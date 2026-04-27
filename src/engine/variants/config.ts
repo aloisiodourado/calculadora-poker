@@ -1,0 +1,89 @@
+import { PokerVariant, VariantConfig } from "./types";
+
+export const VARIANT_CONFIGS: Record<PokerVariant, VariantConfig> = {
+  [PokerVariant.TexasHoldem]: {
+    name: "Texas Hold'em",
+    holeCards: 2,
+    communityCards: 5,
+    totalCards: 7,
+    evaluators: ["high"],
+    omahaRules: false,
+    studGame: false,
+  },
+  [PokerVariant.OmahaHi]: {
+    name: "Omaha Hi",
+    holeCards: 4,
+    communityCards: 5,
+    totalCards: 9,
+    evaluators: ["high"],
+    omahaRules: true,
+    studGame: false,
+  },
+  [PokerVariant.OmahaHiLo]: {
+    name: "Omaha Hi-Lo",
+    holeCards: 4,
+    communityCards: 5,
+    totalCards: 9,
+    evaluators: ["high", "a5low"],
+    omahaRules: true,
+    studGame: false,
+  },
+  [PokerVariant.SevenCardStud]: {
+    name: "7-Card Stud",
+    holeCards: 7,
+    communityCards: 0,
+    totalCards: 7,
+    evaluators: ["high"],
+    omahaRules: false,
+    studGame: true,
+  },
+  [PokerVariant.StudHiLo]: {
+    name: "Stud Hi-Lo (8-or-Better)",
+    holeCards: 7,
+    communityCards: 0,
+    totalCards: 7,
+    evaluators: ["high", "a5low"],
+    omahaRules: false,
+    studGame: true,
+  },
+  [PokerVariant.Razz]: {
+    name: "Razz",
+    holeCards: 7,
+    communityCards: 0,
+    totalCards: 7,
+    evaluators: ["a5low"],
+    omahaRules: false,
+    studGame: true,
+  },
+  [PokerVariant.SingleDraw27]: {
+    name: "2-7 Single Draw",
+    holeCards: 5,
+    communityCards: 0,
+    totalCards: 5,
+    evaluators: ["27low"],
+    omahaRules: false,
+    studGame: false,
+  },
+  [PokerVariant.TripleDraw27]: {
+    name: "2-7 Triple Draw",
+    holeCards: 5,
+    communityCards: 0,
+    totalCards: 5,
+    evaluators: ["27low"],
+    omahaRules: false,
+    studGame: false,
+  },
+  [PokerVariant.Badugi]: {
+    name: "Badugi",
+    holeCards: 4,
+    communityCards: 0,
+    totalCards: 4,
+    evaluators: ["badugi"],
+    omahaRules: false,
+    studGame: false,
+  },
+};
+
+export function getVariantConfig(variant: PokerVariant): VariantConfig {
+  return VARIANT_CONFIGS[variant];
+}

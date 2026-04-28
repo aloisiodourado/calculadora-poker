@@ -31,7 +31,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <DeckColorProvider>
-          <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+          <TooltipProvider delay={300}>{children}</TooltipProvider>
         </DeckColorProvider>
       </body>
     </html>

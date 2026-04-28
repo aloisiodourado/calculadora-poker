@@ -126,44 +126,42 @@ export function CardPicker({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
+      <PopoverTrigger
+        className={cn(
+          "flex flex-col items-center gap-0.5 cursor-pointer focus:outline-none group",
+          className
+        )}
+        onClick={handleTriggerClick}
+        title={selected ? "Click to clear" : "Click to pick a card"}
+      >
+        {label && (
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+            {label}
+          </span>
+        )}
+        <div
           className={cn(
-            "flex flex-col items-center gap-0.5 cursor-pointer focus:outline-none group",
-            className
+            "h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5",
+            selected
+              ? "bg-white shadow-md group-hover:border-red-400"
+              : "border-dashed border-muted-foreground/30 bg-muted/20 group-hover:border-blue-400 group-hover:bg-blue-50",
+            highlighted && "ring-2 ring-emerald-400 ring-offset-1",
+            dimmed && "opacity-30",
           )}
-          onClick={handleTriggerClick}
-          title={selected ? "Click to clear" : "Click to pick a card"}
         >
-          {label && (
-            <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-              {label}
-            </span>
+          {selected ? (
+            <>
+              <span className={cn("text-2xl leading-none font-bold", suitColors[selected.suit])}>
+                {RANK_LABELS[selected.rank]}
+              </span>
+              <span className={cn("text-xl leading-none", suitColors[selected.suit])}>
+                {SUIT_SYMBOLS[selected.suit]}
+              </span>
+            </>
+          ) : (
+            <span className="text-base text-muted-foreground">?</span>
           )}
-          <div
-            className={cn(
-              "h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5",
-              selected
-                ? "bg-white shadow-md group-hover:border-red-400"
-                : "border-dashed border-muted-foreground/30 bg-muted/20 group-hover:border-blue-400 group-hover:bg-blue-50",
-              highlighted && "ring-2 ring-emerald-400 ring-offset-1",
-              dimmed && "opacity-30",
-            )}
-          >
-            {selected ? (
-              <>
-                <span className={cn("text-2xl leading-none font-bold", suitColors[selected.suit])}>
-                  {RANK_LABELS[selected.rank]}
-                </span>
-                <span className={cn("text-xl leading-none", suitColors[selected.suit])}>
-                  {SUIT_SYMBOLS[selected.suit]}
-                </span>
-              </>
-            ) : (
-              <span className="text-base text-muted-foreground">?</span>
-            )}
-          </div>
-        </button>
+        </div>
       </PopoverTrigger>
 
       <PopoverContent className="w-auto p-3" align="start" side="bottom">

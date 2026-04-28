@@ -1,10 +1,11 @@
 "use client";
 
-import { Card } from "@/engine/cards";
+import { Card, Rank } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { VariantConfig } from "@/engine/variants/types";
-import { HandResult } from "@/engine/simulator/types";
+import { HandResult, DrawRoundStrategy } from "@/engine/simulator/types";
 import { bestBadugiHand } from "@/engine/evaluators/BadugiEvaluator";
+import { RANK_LABELS } from "@/components/CardPicker";
 import { CardPicker } from "@/components/CardPicker";
 import { HandPreview } from "@/components/HandPreview";
 import { Button } from "@/components/ui/button";
@@ -76,8 +77,12 @@ interface HandInputProps {
   result?: HandResult;
   isHiLo?: boolean;
   iterationsRun?: number;
+  // Triple Draw 2-7
+  drawRoundsLeft?: number;
+  drawStrategies?: DrawRoundStrategy[];
   onCardChange: (cardIndex: number, card: Card | null) => void;
   onDiscardToggle: (cardIndex: number) => void;
+  onDrawStrategyChange: (roundIdx: number, threshold: Rank) => void;
   onRemove: () => void;
   canRemove: boolean;
 }
@@ -94,8 +99,11 @@ export function HandInput({
   result,
   isHiLo,
   iterationsRun,
+  drawRoundsLeft,
+  drawStrategies,
   onCardChange,
   onDiscardToggle,
+  onDrawStrategyChange,
   onRemove,
   canRemove,
 }: HandInputProps) {
@@ -103,11 +111,19 @@ export function HandInput({
   const isStud = STUD_VARIANTS.includes(variant);
   const isDraw = DRAW_VARIANTS.includes(variant);
   const isBadugi = variant === PokerVariant.Badugi;
+  const isTripleDraw = variant === PokerVariant.TripleDraw27;
 
   // Compute effective Badugi hand for highlight
   const badugiEffective = isBadugi
     ? bestBadugiHand(cards.filter((c): c is Card => c !== null))
     : [];
+
+  function slotBlocked(slotIdx: number): Card[] {
+    return [
+      ...blockedCards,
+      ...cards.filter((c, ci): c is Card => c !== null && ci !== slotIdx),
+    ];
+  }
 
   function isBadugiValid(cardIdx: number): boolean {
     const card = cards[cardIdx];
@@ -156,7 +172,7 @@ export function HandInput({
         <StudLayout
           cards={cards}
           discards={discards}
-          blockedCards={blockedCards}
+          slotBlocked={slotBlocked}
           onCardChange={onCardChange}
         />
       )}
@@ -166,12 +182,22 @@ export function HandInput({
         <DrawLayout
           cards={cards}
           discards={discards}
-          blockedCards={blockedCards}
+          slotBlocked={slotBlocked}
           isBadugi={isBadugi}
+          isTripleDraw={isTripleDraw}
           isBadugiValid={isBadugiValid}
           onCardChange={onCardChange}
           onDiscardToggle={onDiscardToggle}
           variant={variant}
+        />
+      )}
+
+      {/* Triple Draw strategy config */}
+      {isTripleDraw && drawRoundsLeft != null && drawStrategies && (
+        <TripleDrawStrategy
+          drawRoundsLeft={drawRoundsLeft}
+          strategies={drawStrategies}
+          onChange={onDrawStrategyChange}
         />
       )}
 
@@ -183,7 +209,7 @@ export function HandInput({
               key={i}
               selected={cards[i] ?? null}
               onSelect={(card) => onCardChange(i, card)}
-              blockedCards={blockedCards}
+              blockedCards={slotBlocked(i)}
             />
           ))}
         </div>
@@ -215,12 +241,12 @@ export function HandInput({
 function StudLayout({
   cards,
   discards,
-  blockedCards,
+  slotBlocked,
   onCardChange,
 }: {
   cards: (Card | null)[];
   discards: boolean[];
-  blockedCards: Card[];
+  slotBlocked: (i: number) => Card[];
   onCardChange: (i: number, c: Card | null) => void;
 }) {
   const holeSlots = [0, 1];
@@ -240,7 +266,7 @@ function StudLayout({
               key={i}
               selected={cards[i] ?? null}
               onSelect={(c) => onCardChange(i, c)}
-              blockedCards={blockedCards}
+              blockedCards={slotBlocked(i)}
               label={STUD_LABELS[i]}
             />
           ))}
@@ -260,7 +286,7 @@ function StudLayout({
               key={i}
               selected={cards[i] ?? null}
               onSelect={(c) => onCardChange(i, c)}
-              blockedCards={blockedCards}
+              blockedCards={slotBlocked(i)}
               label={STUD_LABELS[i]}
             />
           ))}
@@ -277,7 +303,7 @@ function StudLayout({
         <CardPicker
           selected={cards[seventhSlot] ?? null}
           onSelect={(c) => onCardChange(seventhSlot, c)}
-          blockedCards={blockedCards}
+          blockedCards={slotBlocked(seventhSlot)}
         />
       </div>
     </div>
@@ -295,8 +321,9 @@ const DRAW_ROUNDS: Record<string, number> = {
 function DrawLayout({
   cards,
   discards,
-  blockedCards,
+  slotBlocked,
   isBadugi,
+  isTripleDraw,
   isBadugiValid,
   onCardChange,
   onDiscardToggle,
@@ -304,15 +331,16 @@ function DrawLayout({
 }: {
   cards: (Card | null)[];
   discards: boolean[];
-  blockedCards: Card[];
+  slotBlocked: (i: number) => Card[];
   isBadugi: boolean;
+  isTripleDraw: boolean;
   isBadugiValid: (i: number) => boolean;
   onCardChange: (i: number, c: Card | null) => void;
   onDiscardToggle: (i: number) => void;
   variant: PokerVariant;
 }) {
-  const rounds = DRAW_ROUNDS[variant] ?? 1;
   const discardCount = discards.filter(Boolean).length;
+  const showDiscardCheckboxes = !isBadugi && !isTripleDraw;
 
   return (
     <div className="space-y-2">
@@ -321,14 +349,13 @@ function DrawLayout({
           {cards.map((card, i) => {
             const isDiscard = discards[i];
             const valid = isBadugi ? isBadugiValid(i) : null;
-            const invalid = isBadugi && card !== null && !isBadugiValid(i);
 
             return (
               <div key={i} className="flex flex-col items-center gap-1">
                 <CardPicker
                   selected={card}
                   onSelect={(c) => onCardChange(i, c)}
-                  blockedCards={blockedCards}
+                  blockedCards={slotBlocked(i)}
                   dimmed={isDiscard}
                   highlighted={isBadugi && valid === true}
                   className={cn(isDiscard && "opacity-40")}
@@ -354,7 +381,7 @@ function DrawLayout({
                   </Tooltip>
                 )}
 
-                {!isBadugi && card && (
+                {showDiscardCheckboxes && card && (
                   <Tooltip>
                     <TooltipTrigger>
                       <div
@@ -379,7 +406,7 @@ function DrawLayout({
           })}
         </div>
 
-        {!isBadugi && discardCount > 0 && (
+        {showDiscardCheckboxes && discardCount > 0 && (
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <Trash2 className="h-3 w-3" />
             {discardCount} para descarte
@@ -387,12 +414,66 @@ function DrawLayout({
         )}
       </div>
 
-      {!isBadugi && (
+      {showDiscardCheckboxes && (
         <p className="text-[10px] text-muted-foreground">
-          {rounds === 1 ? "Single Draw" : `Triple Draw (${rounds} rodadas)`} ·
+          Single Draw ·
           Marque as cartas que você descartaria para calcular a equidade antes do draw
         </p>
       )}
+    </div>
+  );
+}
+
+// ── Triple Draw strategy config ────────────────────────────────────────────────
+
+const THRESHOLD_OPTIONS: Rank[] = [
+  Rank.Seven, Rank.Eight, Rank.Nine, Rank.Ten, Rank.Jack, Rank.Queen, Rank.King,
+];
+
+const DRAW_LABELS: Record<number, string> = {
+  0: "1º draw",
+  1: "2º draw",
+  2: "3º draw (final)",
+};
+
+function TripleDrawStrategy({
+  drawRoundsLeft,
+  strategies,
+  onChange,
+}: {
+  drawRoundsLeft: number;
+  strategies: DrawRoundStrategy[];
+  onChange: (roundIdx: number, threshold: Rank) => void;
+}) {
+  const startIdx = 3 - drawRoundsLeft;
+  const activeRounds = Array.from({ length: drawRoundsLeft }, (_, i) => startIdx + i);
+
+  return (
+    <div className="pt-1 border-t border-black/5">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+        Estratégia de descarte
+      </p>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {activeRounds.map((roundIdx) => (
+          <div key={roundIdx} className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+              {DRAW_LABELS[roundIdx]}:
+            </span>
+            <span className="text-[11px] text-muted-foreground">manter ≤</span>
+            <select
+              value={strategies[roundIdx]?.keepThreshold}
+              onChange={(e) => onChange(roundIdx, Number(e.target.value) as Rank)}
+              className="text-[11px] font-medium border rounded px-1 py-0.5 bg-background cursor-pointer focus:outline-none"
+            >
+              {THRESHOLD_OPTIONS.map((r) => (
+                <option key={r} value={r}>
+                  {RANK_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

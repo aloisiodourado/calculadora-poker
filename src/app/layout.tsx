@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { DeckColorProvider } from "@/contexts/DeckColorContext";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,7 +30,9 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+        <DeckColorProvider>
+          <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
+        </DeckColorProvider>
       </body>
     </html>
   );

@@ -8,10 +8,11 @@ import { SimulationResult } from "@/engine/simulator/types";
 import { VariantSelector } from "@/components/VariantSelector";
 import { HandInput } from "@/components/HandInput";
 import { BoardInput } from "@/components/BoardInput";
-import { EquityDisplay } from "@/components/EquityDisplay";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Loader2, Plus } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { useDeckColor } from "@/contexts/DeckColorContext";
 
 const DEFAULT_VARIANT = PokerVariant.TexasHoldem;
 const MAX_PLAYERS = 6;
@@ -35,6 +36,7 @@ export default function Home() {
 
   const config = useMemo(() => getVariantConfig(variant), [variant]);
   const isHiLo = config.evaluators.length === 2;
+  const { scheme, toggle } = useDeckColor();
 
   const allSelectedCards = useMemo<Card[]>(() => {
     const cards: Card[] = [];
@@ -59,7 +61,6 @@ export default function Home() {
       next[handIdx][cardIdx] = card;
       return next;
     });
-    // Clear discard when card is removed
     if (!card) {
       setDiscards((prev) => {
         const next = prev.map((d) => [...d]);
@@ -103,7 +104,6 @@ export default function Home() {
     setError(null);
     setResult(null);
 
-    // Cards marked for discard are treated as unknown (not sent to API)
     const handData = hands.map((h, hi) =>
       h.filter((c, ci): c is Card => c !== null && !discards[hi][ci])
     );
@@ -127,15 +127,26 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b px-6 py-4">
-        <h1 className="text-xl font-bold tracking-tight">Poker Equity Calculator</h1>
-        <p className="text-sm text-muted-foreground">
-          Compare hand equities via Monte Carlo simulation
-        </p>
+      <header className="border-b px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold tracking-tight">Poker Equity Calculator</h1>
+          <p className="text-sm text-muted-foreground">
+            Compare hand equities via Monte Carlo simulation
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground select-none">
+            {scheme === "4color" ? "4 cores" : "2 cores"}
+          </span>
+          <Switch
+            checked={scheme === "4color"}
+            onCheckedChange={toggle}
+            aria-label="Alternar esquema de cores do baralho"
+          />
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-5">
-        {/* Variant selector */}
         <div className="flex items-end gap-4 flex-wrap">
           <VariantSelector value={variant} onChange={handleVariantChange} />
           <div className="text-xs text-muted-foreground pb-1">
@@ -147,7 +158,6 @@ export default function Home() {
 
         <Separator />
 
-        {/* Board */}
         {config.communityCards > 0 && (
           <BoardInput
             cards={board}
@@ -158,7 +168,6 @@ export default function Home() {
           />
         )}
 
-        {/* Hands */}
         <div className="space-y-3">
           {hands.map((hand, i) => {
             const otherCards = allSelectedCards.filter(
@@ -175,6 +184,9 @@ export default function Home() {
                 boardCards={board}
                 variant={variant}
                 config={config}
+                result={result?.results[i]}
+                isHiLo={isHiLo}
+                iterationsRun={result?.iterationsRun}
                 onCardChange={(cardIdx, card) => handleHandCardChange(i, cardIdx, card)}
                 onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
                 onRemove={() => removePlayer(i)}
@@ -184,7 +196,6 @@ export default function Home() {
           })}
         </div>
 
-        {/* Actions */}
         <div className="flex gap-3 flex-wrap">
           {hands.length < MAX_PLAYERS && (
             <Button variant="outline" size="sm" onClick={addPlayer}>
@@ -210,7 +221,11 @@ export default function Home() {
           </div>
         )}
 
-        {result && <EquityDisplay result={result} isHiLo={isHiLo} />}
+        {result && (
+          <p className="text-xs text-center text-muted-foreground">
+            {result.iterationsRun.toLocaleString()} iterações · {result.durationMs}ms
+          </p>
+        )}
       </main>
     </div>
   );

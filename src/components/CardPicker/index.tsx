@@ -8,6 +8,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useDeckColor } from "@/contexts/DeckColorContext";
 
 export const RANK_LABELS: Record<Rank, string> = {
   [Rank.Two]: "2", [Rank.Three]: "3", [Rank.Four]: "4",
@@ -22,12 +23,11 @@ export const SUIT_SYMBOLS: Record<Suit, string> = {
   [Suit.Diamonds]: "♦", [Suit.Clubs]: "♣",
 };
 
-export const SUIT_COLORS: Record<Suit, string> = {
-  [Suit.Spades]: "text-slate-800",
-  [Suit.Clubs]: "text-slate-800",
-  [Suit.Hearts]: "text-red-600",
-  [Suit.Diamonds]: "text-red-600",
-};
+// Kept for reference; actual colors come from DeckColorContext at runtime
+export { SUIT_COLORS_4 as SUIT_COLORS } from "@/contexts/DeckColorContext";
+
+// Display order in the picker grid: ♠ ♥ ♦ ♣
+const DISPLAY_SUITS = [Suit.Spades, Suit.Hearts, Suit.Diamonds, Suit.Clubs];
 
 interface CardDisplayProps {
   card: Card | null;
@@ -38,6 +38,7 @@ interface CardDisplayProps {
 }
 
 export function CardDisplay({ card, dimmed, highlighted, label, className }: CardDisplayProps) {
+  const { suitColors } = useDeckColor();
   return (
     <div className="flex flex-col items-center gap-0.5">
       {label && (
@@ -47,9 +48,9 @@ export function CardDisplay({ card, dimmed, highlighted, label, className }: Car
       )}
       <div
         className={cn(
-          "h-12 w-9 rounded-lg border-2 flex flex-col items-center justify-center font-bold select-none transition-all",
+          "h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5",
           card
-            ? "bg-white shadow-sm"
+            ? "bg-white shadow-md"
             : "border-dashed border-muted-foreground/30 bg-muted/20",
           highlighted && "ring-2 ring-emerald-400 ring-offset-1",
           dimmed && "opacity-30",
@@ -58,15 +59,15 @@ export function CardDisplay({ card, dimmed, highlighted, label, className }: Car
       >
         {card ? (
           <>
-            <span className={cn("text-sm leading-none", SUIT_COLORS[card.suit])}>
+            <span className={cn("text-2xl leading-none font-bold", suitColors[card.suit])}>
               {RANK_LABELS[card.rank]}
             </span>
-            <span className={cn("text-sm leading-none", SUIT_COLORS[card.suit])}>
+            <span className={cn("text-xl leading-none", suitColors[card.suit])}>
               {SUIT_SYMBOLS[card.suit]}
             </span>
           </>
         ) : (
-          <span className="text-xs text-muted-foreground">?</span>
+          <span className="text-base text-muted-foreground">?</span>
         )}
       </div>
     </div>
@@ -93,6 +94,7 @@ export function CardPicker({
   className,
 }: CardPickerProps) {
   const [open, setOpen] = useState(false);
+  const { suitColors } = useDeckColor();
 
   function isBlocked(card: Card): boolean {
     return blockedCards.some((b) => b.rank === card.rank && b.suit === card.suit);
@@ -140,9 +142,9 @@ export function CardPicker({
           )}
           <div
             className={cn(
-              "h-12 w-9 rounded-lg border-2 flex flex-col items-center justify-center font-bold select-none transition-all",
+              "h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5",
               selected
-                ? "bg-white shadow-sm group-hover:border-red-400"
+                ? "bg-white shadow-md group-hover:border-red-400"
                 : "border-dashed border-muted-foreground/30 bg-muted/20 group-hover:border-blue-400 group-hover:bg-blue-50",
               highlighted && "ring-2 ring-emerald-400 ring-offset-1",
               dimmed && "opacity-30",
@@ -150,24 +152,24 @@ export function CardPicker({
           >
             {selected ? (
               <>
-                <span className={cn("text-sm leading-none", SUIT_COLORS[selected.suit])}>
+                <span className={cn("text-2xl leading-none font-bold", suitColors[selected.suit])}>
                   {RANK_LABELS[selected.rank]}
                 </span>
-                <span className={cn("text-sm leading-none", SUIT_COLORS[selected.suit])}>
+                <span className={cn("text-xl leading-none", suitColors[selected.suit])}>
                   {SUIT_SYMBOLS[selected.suit]}
                 </span>
               </>
             ) : (
-              <span className="text-xs text-muted-foreground">?</span>
+              <span className="text-base text-muted-foreground">?</span>
             )}
           </div>
         </button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-auto p-2" align="start" side="bottom">
-        <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(${RANKS.length}, 1fr)` }}>
-          {SUITS.map((suit) =>
-            RANKS.map((rank) => {
+      <PopoverContent className="w-auto p-3" align="start" side="bottom">
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${RANKS.length}, 1fr)` }}>
+          {DISPLAY_SUITS.map((suit) =>
+            [...RANKS].reverse().map((rank) => {
               const card: Card = { rank, suit };
               const blocked = isBlocked(card);
               const sel = isSelected(card);
@@ -177,15 +179,15 @@ export function CardPicker({
                   onClick={() => handleGridClick(card)}
                   disabled={blocked}
                   className={cn(
-                    "w-7 h-8 rounded text-[11px] font-semibold flex flex-col items-center justify-center leading-none transition-all",
+                    "w-[76px] h-[88px] rounded-xl font-bold flex flex-col items-center justify-center leading-none transition-all gap-1",
                     blocked && "opacity-20 cursor-not-allowed",
-                    sel && "bg-blue-500 text-white scale-105 shadow",
+                    sel && "bg-blue-500 text-white scale-105 shadow-md",
                     !blocked && !sel && "hover:bg-muted hover:scale-105 cursor-pointer",
-                    SUIT_COLORS[suit]
+                    suitColors[suit]
                   )}
                 >
-                  <span>{RANK_LABELS[rank]}</span>
-                  <span>{SUIT_SYMBOLS[suit]}</span>
+                  <span className="text-xl">{RANK_LABELS[rank]}</span>
+                  <span className="text-xl">{SUIT_SYMBOLS[suit]}</span>
                 </button>
               );
             })

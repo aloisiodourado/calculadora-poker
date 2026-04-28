@@ -3,6 +3,7 @@
 import { Card } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { VariantConfig } from "@/engine/variants/types";
+import { HandResult } from "@/engine/simulator/types";
 import { bestBadugiHand } from "@/engine/evaluators/BadugiEvaluator";
 import { CardPicker } from "@/components/CardPicker";
 import { HandPreview } from "@/components/HandPreview";
@@ -72,6 +73,9 @@ interface HandInputProps {
   boardCards: (Card | null)[];
   variant: PokerVariant;
   config: VariantConfig;
+  result?: HandResult;
+  isHiLo?: boolean;
+  iterationsRun?: number;
   onCardChange: (cardIndex: number, card: Card | null) => void;
   onDiscardToggle: (cardIndex: number) => void;
   onRemove: () => void;
@@ -87,6 +91,9 @@ export function HandInput({
   boardCards,
   variant,
   config,
+  result,
+  isHiLo,
+  iterationsRun,
   onCardChange,
   onDiscardToggle,
   onRemove,
@@ -108,6 +115,8 @@ export function HandInput({
     return badugiEffective.some((c) => c.rank === card.rank && c.suit === card.suit);
   }
 
+  const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
   return (
     <div
       className={cn(
@@ -128,11 +137,18 @@ export function HandInput({
             config={config}
           />
         </div>
-        {canRemove && (
-          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={onRemove}>
-            <X className="h-3 w-3" />
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {result && (
+            <span className="text-2xl font-bold tabular-nums">
+              {pct(result.equity)}
+            </span>
+          )}
+          {canRemove && (
+            <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" onClick={onRemove}>
+              <X className="h-3 w-3" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stud layout */}
@@ -170,6 +186,24 @@ export function HandInput({
               blockedCards={blockedCards}
             />
           ))}
+        </div>
+      )}
+
+      {/* Equity breakdown */}
+      {result && iterationsRun && (
+        <div className="flex gap-3 text-xs text-muted-foreground pt-1 border-t border-black/5 flex-wrap">
+          {isHiLo ? (
+            <>
+              <span>Hi: <strong>{pct(result.hiWins / iterationsRun)}</strong></span>
+              <span>Lo: <strong>{pct(result.loWins / iterationsRun)}</strong></span>
+              <span>Lo qualif.: <strong>{pct(result.loQualified / iterationsRun)}</strong></span>
+            </>
+          ) : (
+            <>
+              <span>Win: <strong>{pct(result.wins / iterationsRun)}</strong></span>
+              <span>Loss: <strong>{pct(result.losses / iterationsRun)}</strong></span>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -16,8 +16,9 @@ import { Switch } from "@/components/ui/switch";
 import { useDeckColor } from "@/contexts/DeckColorContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
-const DEFAULT_VARIANT = PokerVariant.TexasHoldem;
+const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
 const MAX_PLAYERS = 6;
+const TRIPLE_DRAW_SLOTS = 5;
 
 function emptyHand(size: number): (Card | null)[] {
   return Array(size).fill(null);
@@ -31,11 +32,16 @@ function defaultStrategies(): DrawRoundStrategy[] {
   return DEFAULT_DRAW_THRESHOLDS.map((keepThreshold) => ({ keepThreshold }));
 }
 
+function emptyExplicitDiscards(): boolean[] {
+  return Array(TRIPLE_DRAW_SLOTS).fill(false);
+}
+
 export default function Home() {
   const [variant, setVariant] = useState<PokerVariant>(DEFAULT_VARIANT);
-  const [hands, setHands] = useState<(Card | null)[][]>([emptyHand(2), emptyHand(2)]);
-  const [discards, setDiscards] = useState<boolean[][]>([emptyDiscards(2), emptyDiscards(2)]);
-  const [board, setBoard] = useState<(Card | null)[]>(Array(5).fill(null));
+  const defaultConfig = getVariantConfig(DEFAULT_VARIANT);
+  const [hands, setHands] = useState<(Card | null)[][]>([emptyHand(defaultConfig.holeCards), emptyHand(defaultConfig.holeCards)]);
+  const [discards, setDiscards] = useState<boolean[][]>([emptyDiscards(defaultConfig.holeCards), emptyDiscards(defaultConfig.holeCards)]);
+  const [board, setBoard] = useState<(Card | null)[]>(Array(defaultConfig.communityCards).fill(null));
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +51,10 @@ export default function Home() {
   const [playerDrawStrategies, setPlayerDrawStrategies] = useState<DrawRoundStrategy[][]>([
     defaultStrategies(),
     defaultStrategies(),
+  ]);
+  const [playerExplicitDiscards, setPlayerExplicitDiscards] = useState<boolean[][]>([
+    emptyExplicitDiscards(),
+    emptyExplicitDiscards(),
   ]);
 
   const config = useMemo(() => getVariantConfig(variant), [variant]);
@@ -66,6 +76,7 @@ export default function Home() {
     setDiscards((prev) => prev.map(() => emptyDiscards(newConfig.holeCards)));
     setBoard(Array(newConfig.communityCards).fill(null));
     setDrawRoundsLeft(3);
+    setPlayerExplicitDiscards((prev) => prev.map(() => emptyExplicitDiscards()));
     setResult(null);
     setError(null);
   }
@@ -82,6 +93,13 @@ export default function Home() {
         next[handIdx][cardIdx] = false;
         return next;
       });
+    } else {
+      // Card selected: clear explicit discard on this slot
+      setPlayerExplicitDiscards((prev) => {
+        const next = prev.map((d) => [...d]);
+        next[handIdx][cardIdx] = false;
+        return next;
+      });
     }
     setResult(null);
   }
@@ -90,6 +108,15 @@ export default function Home() {
     setDiscards((prev) => {
       const next = prev.map((d) => [...d]);
       next[handIdx][cardIdx] = !next[handIdx][cardIdx];
+      return next;
+    });
+    setResult(null);
+  }
+
+  function handleExplicitDiscardToggle(playerIdx: number, slotIdx: number) {
+    setPlayerExplicitDiscards((prev) => {
+      const next = prev.map((d) => [...d]);
+      next[playerIdx][slotIdx] = !next[playerIdx][slotIdx];
       return next;
     });
     setResult(null);
@@ -114,6 +141,7 @@ export default function Home() {
     setHands((prev) => [...prev, emptyHand(config.holeCards)]);
     setDiscards((prev) => [...prev, emptyDiscards(config.holeCards)]);
     setPlayerDrawStrategies((prev) => [...prev, defaultStrategies()]);
+    setPlayerExplicitDiscards((prev) => [...prev, emptyExplicitDiscards()]);
     setResult(null);
   }
 
@@ -122,6 +150,7 @@ export default function Home() {
     setHands((prev) => prev.filter((_, i) => i !== idx));
     setDiscards((prev) => prev.filter((_, i) => i !== idx));
     setPlayerDrawStrategies((prev) => prev.filter((_, i) => i !== idx));
+    setPlayerExplicitDiscards((prev) => prev.filter((_, i) => i !== idx));
     setResult(null);
   }
 
@@ -146,6 +175,7 @@ export default function Home() {
       if (isTripleDraw) {
         body.drawRoundsLeft = drawRoundsLeft;
         body.playerDrawStrategies = playerDrawStrategies;
+        body.playerExplicitDiscards = playerExplicitDiscards;
       }
 
       const res = await fetch("/api/equity", {
@@ -230,11 +260,13 @@ export default function Home() {
                 iterationsRun={result?.iterationsRun}
                 drawRoundsLeft={isTripleDraw ? drawRoundsLeft : undefined}
                 drawStrategies={isTripleDraw ? playerDrawStrategies[i] : undefined}
+                explicitDiscards={isTripleDraw ? playerExplicitDiscards[i] : undefined}
                 onCardChange={(cardIdx, card) => handleHandCardChange(i, cardIdx, card)}
                 onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
                 onDrawStrategyChange={(roundIdx, threshold) =>
                   handleDrawStrategyChange(i, roundIdx, threshold)
                 }
+                onExplicitDiscardToggle={(slotIdx) => handleExplicitDiscardToggle(i, slotIdx)}
                 onRemove={() => removePlayer(i)}
                 canRemove={hands.length > 2}
               />

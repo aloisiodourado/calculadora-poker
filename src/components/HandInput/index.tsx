@@ -80,9 +80,11 @@ interface HandInputProps {
   // Triple Draw 2-7
   drawRoundsLeft?: number;
   drawStrategies?: DrawRoundStrategy[];
+  explicitDiscards?: boolean[];
   onCardChange: (cardIndex: number, card: Card | null) => void;
   onDiscardToggle: (cardIndex: number) => void;
   onDrawStrategyChange: (roundIdx: number, threshold: Rank) => void;
+  onExplicitDiscardToggle: (slotIdx: number) => void;
   onRemove: () => void;
   canRemove: boolean;
 }
@@ -101,9 +103,11 @@ export function HandInput({
   iterationsRun,
   drawRoundsLeft,
   drawStrategies,
+  explicitDiscards,
   onCardChange,
   onDiscardToggle,
   onDrawStrategyChange,
+  onExplicitDiscardToggle,
   onRemove,
   canRemove,
 }: HandInputProps) {
@@ -186,8 +190,10 @@ export function HandInput({
           isBadugi={isBadugi}
           isTripleDraw={isTripleDraw}
           isBadugiValid={isBadugiValid}
+          explicitDiscards={explicitDiscards}
           onCardChange={onCardChange}
           onDiscardToggle={onDiscardToggle}
+          onExplicitDiscardToggle={onExplicitDiscardToggle}
           variant={variant}
         />
       )}
@@ -325,8 +331,10 @@ function DrawLayout({
   isBadugi,
   isTripleDraw,
   isBadugiValid,
+  explicitDiscards,
   onCardChange,
   onDiscardToggle,
+  onExplicitDiscardToggle,
   variant,
 }: {
   cards: (Card | null)[];
@@ -335,8 +343,10 @@ function DrawLayout({
   isBadugi: boolean;
   isTripleDraw: boolean;
   isBadugiValid: (i: number) => boolean;
+  explicitDiscards?: boolean[];
   onCardChange: (i: number, c: Card | null) => void;
   onDiscardToggle: (i: number) => void;
+  onExplicitDiscardToggle: (i: number) => void;
   variant: PokerVariant;
 }) {
   const discardCount = discards.filter(Boolean).length;
@@ -349,16 +359,41 @@ function DrawLayout({
           {cards.map((card, i) => {
             const isDiscard = discards[i];
             const valid = isBadugi ? isBadugiValid(i) : null;
+            const isExplicitDiscard = isTripleDraw && !card && (explicitDiscards?.[i] ?? false);
 
             return (
               <div key={i} className="flex flex-col items-center gap-1">
+                {/* Explicit discard checkbox — shown above empty slots in Triple Draw */}
+                {isTripleDraw && !card && (
+                  <Tooltip>
+                    <TooltipTrigger>
+                      <div
+                        className="flex items-center gap-1 cursor-pointer"
+                        onClick={() => onExplicitDiscardToggle(i)}
+                      >
+                        <Checkbox
+                          checked={isExplicitDiscard}
+                          className="h-3 w-3"
+                          onCheckedChange={() => onExplicitDiscardToggle(i)}
+                        />
+                        <span className="text-[9px] text-muted-foreground">desc.</span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      {isExplicitDiscard
+                        ? "Descarte garantido: simulado como uma carta qualquer descartada no 1º draw"
+                        : "Marcar como descarte: trata esta posição como uma carta descartada (sem importar qual)"}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+
                 <CardPicker
                   selected={card}
                   onSelect={(c) => onCardChange(i, c)}
                   blockedCards={slotBlocked(i)}
-                  dimmed={isDiscard}
+                  dimmed={isDiscard || isExplicitDiscard}
                   highlighted={isBadugi && valid === true}
-                  className={cn(isDiscard && "opacity-40")}
+                  className={cn((isDiscard || isExplicitDiscard) && "opacity-40")}
                 />
 
                 {isBadugi && card && (

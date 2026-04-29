@@ -52,6 +52,12 @@ Mover para a próxima opção somente se a anterior não resolver o gargalo medi
 
 ---
 
+## 27 Triple Draw — melhorias pendentes
+
+- [ ] **Slots vazios como descarte automático**: quando o jogador não preenche todas as 5 cartas, o sistema deve tratar os slots vazios como cartas já descartadas naquele draw round, em vez de preenchê-las aleatoriamente como uma mão desconhecida. Exemplo: jogador informa 3♠ 7♥ e deixa 3 slots vazios com 1 draw restante → o simulador entende que ele vai descartar 3 cartas e busca substituí-las aplicando a estratégia configurada para o último draw sobre as 2 cartas conhecidas.
+
+---
+
 ## Ideias futuras (sem fase definida)
 
 - Suporte a ranges de mãos (ex: "AA-KK, AKs") além de mãos específicas

@@ -116,7 +116,8 @@ export class MonteCarloSimulator implements SimulatorEngine {
           hands,
           deck,
           input.drawRoundsLeft!,
-          input.playerDrawStrategies
+          input.playerDrawStrategies,
+          input.playerExplicitDiscards
         );
         this.runStandardIteration(finalHands, [], config, results);
       } else {
@@ -150,22 +151,25 @@ export class MonteCarloSimulator implements SimulatorEngine {
     startingHands: Card[][],
     deck: Card[],
     drawRoundsLeft: number,
-    playerStrategies?: DrawRoundStrategy[][]
+    playerStrategies?: DrawRoundStrategy[][],
+    playerExplicitDiscards?: boolean[][]
   ): Card[][] {
-    // ptr walks sequentially through the shuffled deck
     let ptr = 0;
 
-    // Step 1: fill each hand to 5 cards (in case some cards are unknown)
-    const hands = startingHands.map((hand) => {
+    // Step 1: fill each hand, but leave room for explicit-discard slots.
+    // Explicit discards are guaranteed draws in round 0, so we don't fill those
+    // slots with random cards — we just count them as extra draws later.
+    const hands = startingHands.map((hand, p) => {
+      const numExplicit = playerExplicitDiscards?.[p]?.filter(Boolean).length ?? 0;
       const completed = [...hand];
-      while (completed.length < 5 && ptr < deck.length) {
+      const target = 5 - numExplicit;
+      while (completed.length < target && ptr < deck.length) {
         completed.push(deck[ptr++]);
       }
       return completed;
     });
 
-    // The first draw round index into the strategy array
-    // e.g. drawRoundsLeft=2 → start at index 1 (use strategies[1] and strategies[2])
+    // e.g. drawRoundsLeft=2 → startIdx=1, uses strategies[1] and strategies[2]
     const startIdx = 3 - drawRoundsLeft;
 
     // Step 2: simulate each draw round
@@ -178,9 +182,14 @@ export class MonteCarloSimulator implements SimulatorEngine {
         };
 
         const { keep } = applyDrawStrategy(hands[p], strategy);
-        const numDraw = 5 - keep.length;
-        const drawn: Card[] = [];
 
+        // In round 0, explicit discard slots are guaranteed extra draws
+        const explicitCount = round === 0
+          ? (playerExplicitDiscards?.[p]?.filter(Boolean).length ?? 0)
+          : 0;
+
+        const numDraw = (hands[p].length - keep.length) + explicitCount;
+        const drawn: Card[] = [];
         for (let d = 0; d < numDraw; d++) {
           if (ptr < deck.length) drawn.push(deck[ptr++]);
         }

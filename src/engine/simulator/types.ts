@@ -12,6 +12,7 @@ export interface SimulationInput {
   // Triple Draw params
   drawRoundsLeft?: number;           // 1, 2, or 3 — how many draw rounds remain
   playerDrawStrategies?: DrawRoundStrategy[][];  // [playerIdx][3] — always 3 entries, last drawRoundsLeft used
+  playerExplicitDiscards?: boolean[][];  // [playerIdx][slotIdx] — true = guaranteed discard this round
 }
 
 export interface HandResult {

@@ -274,7 +274,7 @@ export default function Home() {
                 iterationsRun={result?.iterationsRun}
                 drawRoundsLeft={isTripleDraw ? drawRoundsLeft : undefined}
                 drawStrategies={isTripleDraw ? playerDrawStrategies[i] : undefined}
-                explicitDiscards={isTripleDraw ? playerExplicitDiscards[i] : undefined}
+                explicitDiscards={(isTripleDraw || variant === PokerVariant.SingleDraw27) ? playerExplicitDiscards[i] : undefined}
                 onCardChange={(cardIdx, card) => handleHandCardChange(i, cardIdx, card)}
                 onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
                 onDrawStrategyChange={(roundIdx, threshold) =>

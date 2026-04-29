@@ -116,6 +116,13 @@ export function HandInput({
   const isDraw = DRAW_VARIANTS.includes(variant);
   const isBadugi = variant === PokerVariant.Badugi;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
+  const isSingleDraw27 = variant === PokerVariant.SingleDraw27;
+  const showEmptyDiscardCheckboxes = isTripleDraw || isSingleDraw27;
+
+  // Strategy for the current (next) draw round — used by HandPreview to show effective discard count
+  const currentRoundIdx = isTripleDraw && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
+  const currentDrawStrategy =
+    currentRoundIdx != null && drawStrategies ? drawStrategies[currentRoundIdx] : undefined;
 
   // Compute effective Badugi hand for highlight
   const badugiEffective = isBadugi
@@ -155,6 +162,7 @@ export function HandInput({
             boardCards={boardCards}
             variant={variant}
             config={config}
+            drawStrategy={currentDrawStrategy}
           />
         </div>
         <div className="flex items-center gap-2">
@@ -189,6 +197,7 @@ export function HandInput({
           slotBlocked={slotBlocked}
           isBadugi={isBadugi}
           isTripleDraw={isTripleDraw}
+          showEmptyDiscardCheckboxes={showEmptyDiscardCheckboxes}
           isBadugiValid={isBadugiValid}
           explicitDiscards={explicitDiscards}
           onCardChange={onCardChange}
@@ -330,6 +339,7 @@ function DrawLayout({
   slotBlocked,
   isBadugi,
   isTripleDraw,
+  showEmptyDiscardCheckboxes,
   isBadugiValid,
   explicitDiscards,
   onCardChange,
@@ -342,6 +352,7 @@ function DrawLayout({
   slotBlocked: (i: number) => Card[];
   isBadugi: boolean;
   isTripleDraw: boolean;
+  showEmptyDiscardCheckboxes: boolean;
   isBadugiValid: (i: number) => boolean;
   explicitDiscards?: boolean[];
   onCardChange: (i: number, c: Card | null) => void;
@@ -359,12 +370,12 @@ function DrawLayout({
           {cards.map((card, i) => {
             const isDiscard = discards[i];
             const valid = isBadugi ? isBadugiValid(i) : null;
-            const isExplicitDiscard = isTripleDraw && !card && (explicitDiscards?.[i] ?? false);
+            const isExplicitDiscard = showEmptyDiscardCheckboxes && !card && (explicitDiscards?.[i] ?? false);
 
             return (
               <div key={i} className="flex flex-col items-center gap-1">
-                {/* Explicit discard checkbox — shown above empty slots in Triple Draw */}
-                {isTripleDraw && !card && (
+                {/* Explicit discard checkbox — shown above empty slots in draw variants */}
+                {showEmptyDiscardCheckboxes && !card && (
                   <Tooltip>
                     <TooltipTrigger>
                       <div
@@ -381,7 +392,7 @@ function DrawLayout({
                     </TooltipTrigger>
                     <TooltipContent side="top" className="text-xs">
                       {isExplicitDiscard
-                        ? "Descarte garantido: simulado como uma carta qualquer descartada no 1º draw"
+                        ? "Descarte garantido: simulado como uma carta qualquer descartada no draw"
                         : "Marcar como descarte: trata esta posição como uma carta descartada (sem importar qual)"}
                     </TooltipContent>
                   </Tooltip>

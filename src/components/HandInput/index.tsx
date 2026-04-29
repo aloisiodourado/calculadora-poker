@@ -1,11 +1,12 @@
 "use client";
 
-import { Card, Rank } from "@/engine/cards";
+import { useState } from "react";
+import { Card, Rank, Suit, RANKS } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { VariantConfig } from "@/engine/variants/types";
 import { HandResult, DrawRoundStrategy } from "@/engine/simulator/types";
 import { bestBadugiHand } from "@/engine/evaluators/BadugiEvaluator";
-import { RANK_LABELS } from "@/components/CardPicker";
+import { RANK_LABELS, SUIT_SYMBOLS } from "@/components/CardPicker";
 import { CardPicker } from "@/components/CardPicker";
 import { HandPreview } from "@/components/HandPreview";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { X, Trash2 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { X, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { HandCategory, HAND_CATEGORIES, CATEGORY_SHORT, CATEGORY_LABELS, CATEGORY_RANGE_PCT } from "@/lib/representative-hands-27td";
+import { useDeckColor } from "@/contexts/DeckColorContext";
 
 export const PLAYER_COLORS = [
   "bg-blue-500",
@@ -45,17 +53,25 @@ const HAND_BG = [
   "bg-cyan-50/60 dark:bg-cyan-950/30",
 ];
 
-// Stud street labels: cards 0-1 = hole, 2-5 = streets 3-6, 6 = 7th (down)
+const ACTIVE_RING = [
+  "ring-2 ring-blue-400",
+  "ring-2 ring-emerald-400",
+  "ring-2 ring-violet-400",
+  "ring-2 ring-amber-400",
+  "ring-2 ring-rose-400",
+  "ring-2 ring-cyan-400",
+];
+
 const STUD_LABELS = [
   "Hole", "Hole",
   "3rd St", "4th St", "5th St", "6th St",
   "7th St",
 ];
-const STUD_DOWN = [0, 1, 6]; // face-down cards
 
 const DRAW_VARIANTS = [
   PokerVariant.SingleDraw27,
   PokerVariant.TripleDraw27,
+  PokerVariant.TripleDraw27WIP,
   PokerVariant.Badugi,
 ];
 
@@ -64,6 +80,8 @@ const STUD_VARIANTS = [
   PokerVariant.StudHiLo,
   PokerVariant.Razz,
 ];
+
+const DISPLAY_SUITS = [Suit.Spades, Suit.Hearts, Suit.Diamonds, Suit.Clubs];
 
 interface HandInputProps {
   handIndex: number;
@@ -77,14 +95,17 @@ interface HandInputProps {
   result?: HandResult;
   isHiLo?: boolean;
   iterationsRun?: number;
-  // Triple Draw 2-7
   drawRoundsLeft?: number;
   drawStrategies?: DrawRoundStrategy[];
   explicitDiscards?: boolean[];
+  handCategory?: HandCategory | null;
+  isActive?: boolean;
   onCardChange: (cardIndex: number, card: Card | null) => void;
   onDiscardToggle: (cardIndex: number) => void;
   onDrawStrategyChange: (roundIdx: number, threshold: Rank) => void;
   onExplicitDiscardToggle: (slotIdx: number) => void;
+  onCategoryChange?: (category: HandCategory | null) => void;
+  onSetActive?: () => void;
   onRemove: () => void;
   canRemove: boolean;
 }
@@ -104,10 +125,14 @@ export function HandInput({
   drawRoundsLeft,
   drawStrategies,
   explicitDiscards,
+  handCategory,
+  isActive,
   onCardChange,
   onDiscardToggle,
   onDrawStrategyChange,
   onExplicitDiscardToggle,
+  onCategoryChange,
+  onSetActive,
   onRemove,
   canRemove,
 }: HandInputProps) {
@@ -116,30 +141,30 @@ export function HandInput({
   const isDraw = DRAW_VARIANTS.includes(variant);
   const isBadugi = variant === PokerVariant.Badugi;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
+  const isTripleDrawWIP = variant === PokerVariant.TripleDraw27WIP;
   const isSingleDraw27 = variant === PokerVariant.SingleDraw27;
-  const showEmptyDiscardCheckboxes = isTripleDraw || isSingleDraw27;
+  const showEmptyDiscardCheckboxes = isTripleDraw || isTripleDrawWIP || isSingleDraw27;
+  const inCategoryMode = isTripleDrawWIP && !!handCategory;
 
-  // Strategy for the current (next) draw round — used by HandPreview to show effective discard count
-  const currentRoundIdx = isTripleDraw && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
+  const currentRoundIdx = (isTripleDraw || isTripleDrawWIP) && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
   const currentDrawStrategy =
     currentRoundIdx != null && drawStrategies ? drawStrategies[currentRoundIdx] : undefined;
 
-  // Compute effective Badugi hand for highlight
   const badugiEffective = isBadugi
     ? bestBadugiHand(cards.filter((c): c is Card => c !== null))
     : [];
+
+  function isBadugiValid(cardIdx: number): boolean {
+    const card = cards[cardIdx];
+    if (!card) return false;
+    return badugiEffective.some((c) => c.rank === card.rank && c.suit === card.suit);
+  }
 
   function slotBlocked(slotIdx: number): Card[] {
     return [
       ...blockedCards,
       ...cards.filter((c, ci): c is Card => c !== null && ci !== slotIdx),
     ];
-  }
-
-  function isBadugiValid(cardIdx: number): boolean {
-    const card = cards[cardIdx];
-    if (!card) return false;
-    return badugiEffective.some((c) => c.rank === card.rank && c.suit === card.suit);
   }
 
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -149,7 +174,8 @@ export function HandInput({
       className={cn(
         "rounded-xl border-2 p-3 space-y-2",
         HAND_BORDERS[colorIdx],
-        HAND_BG[colorIdx]
+        HAND_BG[colorIdx],
+        isActive && ACTIVE_RING[colorIdx]
       )}
     >
       {/* Header */}
@@ -165,9 +191,20 @@ export function HandInput({
             drawStrategy={currentDrawStrategy}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          {onSetActive && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-6 w-6", isActive ? "text-amber-500" : "text-muted-foreground")}
+              onClick={onSetActive}
+              title={isActive ? "Desmarcar player ativo" : "Selecionar para atribuir mão do Top 10"}
+            >
+              <Target className="h-3 w-3" />
+            </Button>
+          )}
           {result && (
-            <span className="text-2xl font-bold tabular-nums">
+            <span className="text-2xl font-bold tabular-nums ml-1">
               {pct(result.equity)}
             </span>
           )}
@@ -179,7 +216,15 @@ export function HandInput({
         </div>
       </div>
 
-      {/* Stud layout */}
+      {/* WIP category selector */}
+      {isTripleDrawWIP && onCategoryChange && (
+        <CategorySelector
+          selected={handCategory ?? null}
+          onChange={onCategoryChange}
+        />
+      )}
+
+      {/* Stud layout — keeps individual pickers (different structure) */}
       {isStud && (
         <StudLayout
           cards={cards}
@@ -189,26 +234,25 @@ export function HandInput({
         />
       )}
 
-      {/* Draw layout (2-7 and Badugi) */}
+      {/* Draw layout — batch picker on every slot */}
       {isDraw && (
         <DrawLayout
           cards={cards}
           discards={discards}
-          slotBlocked={slotBlocked}
           isBadugi={isBadugi}
-          isTripleDraw={isTripleDraw}
+          isTripleDraw={isTripleDraw || isTripleDrawWIP}
           showEmptyDiscardCheckboxes={showEmptyDiscardCheckboxes}
           isBadugiValid={isBadugiValid}
           explicitDiscards={explicitDiscards}
+          blockedCards={blockedCards}
           onCardChange={onCardChange}
           onDiscardToggle={onDiscardToggle}
           onExplicitDiscardToggle={onExplicitDiscardToggle}
-          variant={variant}
         />
       )}
 
       {/* Triple Draw strategy config */}
-      {isTripleDraw && drawRoundsLeft != null && drawStrategies && (
+      {(isTripleDraw || isTripleDrawWIP) && drawRoundsLeft != null && drawStrategies && (
         <TripleDrawStrategy
           drawRoundsLeft={drawRoundsLeft}
           strategies={drawStrategies}
@@ -216,18 +260,14 @@ export function HandInput({
         />
       )}
 
-      {/* Default layout (Hold'em, Omaha) */}
+      {/* Default layout (Hold'em, Omaha) — also uses batch picker */}
       {!isStud && !isDraw && (
-        <div className="flex gap-2 flex-wrap">
-          {Array.from({ length: holeCardCount }).map((_, i) => (
-            <CardPicker
-              key={i}
-              selected={cards[i] ?? null}
-              onSelect={(card) => onCardChange(i, card)}
-              blockedCards={slotBlocked(i)}
-            />
-          ))}
-        </div>
+        <DefaultLayout
+          cards={cards}
+          holeCardCount={holeCardCount}
+          blockedCards={blockedCards}
+          onCardChange={onCardChange}
+        />
       )}
 
       {/* Equity breakdown */}
@@ -251,120 +291,174 @@ export function HandInput({
   );
 }
 
-// ── Stud layout ────────────────────────────────────────────────────────────────
+// ── Shared batch card picker popover ──────────────────────────────────────────
 
-function StudLayout({
+function BatchPickerPopover({
+  open,
+  onOpenChange,
   cards,
-  discards,
-  slotBlocked,
+  blockedCards,
   onCardChange,
 }: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
   cards: (Card | null)[];
-  discards: boolean[];
-  slotBlocked: (i: number) => Card[];
+  blockedCards: Card[];
   onCardChange: (i: number, c: Card | null) => void;
 }) {
-  const holeSlots = [0, 1];
-  const upSlots = [2, 3, 4, 5];
-  const seventhSlot = 6;
+  const { suitColors } = useDeckColor();
+  const emptySlots = cards.filter((c) => c === null).length;
+  const totalSlots = cards.length;
+  const filledCount = totalSlots - emptySlots;
+
+  function isBlocked(card: Card): boolean {
+    return blockedCards.some((b) => b.rank === card.rank && b.suit === card.suit);
+  }
+
+  function isInHand(card: Card): boolean {
+    return cards.some((c) => c?.rank === card.rank && c?.suit === card.suit);
+  }
+
+  function handleClick(card: Card) {
+    if (isBlocked(card)) return;
+    if (isInHand(card)) {
+      const slotIdx = cards.findIndex((c) => c?.rank === card.rank && c?.suit === card.suit);
+      if (slotIdx !== -1) onCardChange(slotIdx, null);
+    } else {
+      const emptyIdx = cards.findIndex((c) => c === null);
+      if (emptyIdx !== -1) onCardChange(emptyIdx, card);
+    }
+  }
 
   return (
-    <div className="flex items-start gap-4 flex-wrap">
-      {/* Down cards */}
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Hole (down)
-        </span>
-        <div className="flex gap-1.5">
-          {holeSlots.map((i) => (
-            <CardPicker
-              key={i}
-              selected={cards[i] ?? null}
-              onSelect={(c) => onCardChange(i, c)}
-              blockedCards={slotBlocked(i)}
-              label={STUD_LABELS[i]}
-            />
-          ))}
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {/* Invisible trigger — opened programmatically via open prop */}
+      <PopoverTrigger className="sr-only" />
+      <PopoverContent className="w-auto p-3" align="start" side="bottom">
+        <p className="text-[11px] text-muted-foreground mb-2">
+          {emptySlots > 0
+            ? `${filledCount}/${totalSlots} selecionadas · clique para adicionar ou remover`
+            : "Mão completa · clique para remover cartas"}
+        </p>
+        <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${RANKS.length}, 1fr)` }}>
+          {DISPLAY_SUITS.map((suit) =>
+            [...RANKS].reverse().map((rank) => {
+              const card: Card = { rank, suit };
+              const blocked = isBlocked(card);
+              const inHand = isInHand(card);
+              const noRoom = emptySlots === 0 && !inHand;
+              return (
+                <button
+                  key={`${rank}-${suit}`}
+                  onClick={() => handleClick(card)}
+                  disabled={blocked || noRoom}
+                  className={cn(
+                    "w-[76px] h-[88px] rounded-xl font-bold flex flex-col items-center justify-center leading-none transition-all gap-1",
+                    blocked && "opacity-20 cursor-not-allowed",
+                    noRoom && "opacity-30 cursor-not-allowed",
+                    inHand && "bg-blue-500 scale-105 shadow-md",
+                    !blocked && !noRoom && !inHand && "hover:bg-muted hover:scale-105 cursor-pointer",
+                  )}
+                >
+                  <span className={cn("text-xl", inHand ? "text-white" : suitColors[suit])}>{RANK_LABELS[rank]}</span>
+                  <span className={cn("text-xl", inHand ? "text-white" : suitColors[suit])}>{SUIT_SYMBOLS[suit]}</span>
+                </button>
+              );
+            })
+          )}
         </div>
-      </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
-      <div className="w-px bg-slate-200 self-stretch mt-5" />
+// ── Clickable card slot (opens batch picker) ──────────────────────────────────
 
-      {/* Up cards */}
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Up cards
-        </span>
-        <div className="flex gap-1.5">
-          {upSlots.map((i) => (
-            <CardPicker
-              key={i}
-              selected={cards[i] ?? null}
-              onSelect={(c) => onCardChange(i, c)}
-              blockedCards={slotBlocked(i)}
-              label={STUD_LABELS[i]}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="w-px bg-slate-200 self-stretch mt-5" />
-
-      {/* 7th street */}
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          7th St (down)
-        </span>
-        <CardPicker
-          selected={cards[seventhSlot] ?? null}
-          onSelect={(c) => onCardChange(seventhSlot, c)}
-          blockedCards={slotBlocked(seventhSlot)}
-        />
-      </div>
+function ClickableCardSlot({
+  card,
+  dimmed,
+  highlighted,
+  className,
+  onClick,
+}: {
+  card: Card | null;
+  dimmed?: boolean;
+  highlighted?: boolean;
+  className?: string;
+  onClick: () => void;
+}) {
+  const { suitColors } = useDeckColor();
+  return (
+    <div
+      onClick={onClick}
+      title={card ? "Clique para editar a mão" : "Clique para escolher cartas"}
+      className={cn(
+        "h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5 cursor-pointer",
+        card
+          ? "bg-white shadow-md hover:border-blue-400"
+          : "border-dashed border-muted-foreground/30 bg-muted/20 hover:border-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/20",
+        highlighted && "ring-2 ring-emerald-400 ring-offset-1",
+        dimmed && "opacity-40",
+        className
+      )}
+    >
+      {card ? (
+        <>
+          <span className={cn("text-2xl leading-none font-bold", suitColors[card.suit])}>
+            {RANK_LABELS[card.rank]}
+          </span>
+          <span className={cn("text-xl leading-none", suitColors[card.suit])}>
+            {SUIT_SYMBOLS[card.suit]}
+          </span>
+        </>
+      ) : (
+        <span className="text-base text-muted-foreground">?</span>
+      )}
     </div>
   );
 }
 
 // ── Draw layout ────────────────────────────────────────────────────────────────
 
-const DRAW_ROUNDS: Record<string, number> = {
-  [PokerVariant.SingleDraw27]: 1,
-  [PokerVariant.TripleDraw27]: 3,
-  [PokerVariant.Badugi]: 3,
-};
-
 function DrawLayout({
   cards,
   discards,
-  slotBlocked,
   isBadugi,
   isTripleDraw,
   showEmptyDiscardCheckboxes,
   isBadugiValid,
   explicitDiscards,
+  blockedCards,
   onCardChange,
   onDiscardToggle,
   onExplicitDiscardToggle,
-  variant,
 }: {
   cards: (Card | null)[];
   discards: boolean[];
-  slotBlocked: (i: number) => Card[];
   isBadugi: boolean;
   isTripleDraw: boolean;
   showEmptyDiscardCheckboxes: boolean;
   isBadugiValid: (i: number) => boolean;
   explicitDiscards?: boolean[];
+  blockedCards: Card[];
   onCardChange: (i: number, c: Card | null) => void;
   onDiscardToggle: (i: number) => void;
   onExplicitDiscardToggle: (i: number) => void;
-  variant: PokerVariant;
 }) {
-  const discardCount = discards.filter(Boolean).length;
+  const [batchOpen, setBatchOpen] = useState(false);
   const showDiscardCheckboxes = !isBadugi && !isTripleDraw;
+  const discardCount = discards.filter(Boolean).length;
 
   return (
     <div className="space-y-2">
+      <BatchPickerPopover
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        cards={cards}
+        blockedCards={blockedCards}
+        onCardChange={onCardChange}
+      />
+
       <div className="flex items-center gap-3">
         <div className="flex gap-2">
           {cards.map((card, i) => {
@@ -374,37 +468,34 @@ function DrawLayout({
 
             return (
               <div key={i} className="flex flex-col items-center gap-1">
-                {/* Explicit discard checkbox — shown above empty slots in draw variants */}
                 {showEmptyDiscardCheckboxes && !card && (
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <div
-                        className="flex items-center gap-1 cursor-pointer"
-                        onClick={() => onExplicitDiscardToggle(i)}
-                      >
-                        <Checkbox
-                          checked={isExplicitDiscard}
-                          className="h-3 w-3"
-                          onCheckedChange={() => onExplicitDiscardToggle(i)}
-                        />
+                  <div
+                    className="flex items-center gap-1 cursor-pointer"
+                    onClick={() => onExplicitDiscardToggle(i)}
+                  >
+                    <Checkbox
+                      checked={isExplicitDiscard}
+                      className="h-3 w-3"
+                      onCheckedChange={() => onExplicitDiscardToggle(i)}
+                    />
+                    <Tooltip>
+                      <TooltipTrigger>
                         <span className="text-[9px] text-muted-foreground">desc.</span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="text-xs">
-                      {isExplicitDiscard
-                        ? "Descarte garantido: simulado como uma carta qualquer descartada no draw"
-                        : "Marcar como descarte: trata esta posição como uma carta descartada (sem importar qual)"}
-                    </TooltipContent>
-                  </Tooltip>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="text-xs">
+                        {isExplicitDiscard
+                          ? "Descarte garantido: simulado como uma carta qualquer descartada no draw"
+                          : "Marcar como descarte: trata esta posição como uma carta descartada (sem importar qual)"}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 )}
 
-                <CardPicker
-                  selected={card}
-                  onSelect={(c) => onCardChange(i, c)}
-                  blockedCards={slotBlocked(i)}
+                <ClickableCardSlot
+                  card={card}
                   dimmed={isDiscard || isExplicitDiscard}
                   highlighted={isBadugi && valid === true}
-                  className={cn((isDiscard || isExplicitDiscard) && "opacity-40")}
+                  onClick={() => setBatchOpen(true)}
                 />
 
                 {isBadugi && card && (
@@ -428,24 +519,24 @@ function DrawLayout({
                 )}
 
                 {showDiscardCheckboxes && card && (
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <div
-                        className="flex items-center gap-1 cursor-pointer"
-                        onClick={() => onDiscardToggle(i)}
-                      >
-                        <Checkbox
-                          checked={isDiscard}
-                          className="h-3 w-3"
-                          onCheckedChange={() => onDiscardToggle(i)}
-                        />
+                  <div
+                    className="flex items-center gap-1 cursor-pointer"
+                    onClick={() => onDiscardToggle(i)}
+                  >
+                    <Checkbox
+                      checked={isDiscard}
+                      className="h-3 w-3"
+                      onCheckedChange={() => onDiscardToggle(i)}
+                    />
+                    <Tooltip>
+                      <TooltipTrigger>
                         <span className="text-[9px] text-muted-foreground">desc.</span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="text-xs">
-                      Marcar para descarte: esta carta será tratada como desconhecida na simulação
-                    </TooltipContent>
-                  </Tooltip>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        Marcar para descarte: esta carta será tratada como desconhecida na simulação
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 )}
               </div>
             );
@@ -454,7 +545,7 @@ function DrawLayout({
 
         {showDiscardCheckboxes && discardCount > 0 && (
           <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Trash2 className="h-3 w-3" />
+            <span>🗑</span>
             {discardCount} para descarte
           </span>
         )}
@@ -462,9 +553,149 @@ function DrawLayout({
 
       {showDiscardCheckboxes && (
         <p className="text-[10px] text-muted-foreground">
-          Single Draw ·
-          Marque as cartas que você descartaria para calcular a equidade antes do draw
+          Single Draw · Marque as cartas que você descartaria para calcular a equidade antes do draw
         </p>
+      )}
+    </div>
+  );
+}
+
+// ── Default layout (Hold'em, Omaha) — batch picker ────────────────────────────
+
+function DefaultLayout({
+  cards,
+  holeCardCount,
+  blockedCards,
+  onCardChange,
+}: {
+  cards: (Card | null)[];
+  holeCardCount: number;
+  blockedCards: Card[];
+  onCardChange: (i: number, c: Card | null) => void;
+}) {
+  const [batchOpen, setBatchOpen] = useState(false);
+
+  return (
+    <div className="flex gap-2 flex-wrap">
+      <BatchPickerPopover
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        cards={cards}
+        blockedCards={blockedCards}
+        onCardChange={onCardChange}
+      />
+      {Array.from({ length: holeCardCount }).map((_, i) => (
+        <ClickableCardSlot
+          key={i}
+          card={cards[i] ?? null}
+          onClick={() => setBatchOpen(true)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── Stud layout — keeps individual pickers ─────────────────────────────────────
+
+function StudLayout({
+  cards,
+  discards,
+  slotBlocked,
+  onCardChange,
+}: {
+  cards: (Card | null)[];
+  discards: boolean[];
+  slotBlocked: (i: number) => Card[];
+  onCardChange: (i: number, c: Card | null) => void;
+}) {
+  const holeSlots = [0, 1];
+  const upSlots = [2, 3, 4, 5];
+  const seventhSlot = 6;
+
+  return (
+    <div className="flex items-start gap-4 flex-wrap">
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+          Hole (down)
+        </span>
+        <div className="flex gap-1.5">
+          {holeSlots.map((i) => (
+            <CardPicker
+              key={i}
+              selected={cards[i] ?? null}
+              onSelect={(c) => onCardChange(i, c)}
+              blockedCards={slotBlocked(i)}
+              label={STUD_LABELS[i]}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="w-px bg-slate-200 self-stretch mt-5" />
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+          Up cards
+        </span>
+        <div className="flex gap-1.5">
+          {upSlots.map((i) => (
+            <CardPicker
+              key={i}
+              selected={cards[i] ?? null}
+              onSelect={(c) => onCardChange(i, c)}
+              blockedCards={slotBlocked(i)}
+              label={STUD_LABELS[i]}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="w-px bg-slate-200 self-stretch mt-5" />
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+          7th St (down)
+        </span>
+        <CardPicker
+          selected={cards[seventhSlot] ?? null}
+          onSelect={(c) => onCardChange(seventhSlot, c)}
+          blockedCards={slotBlocked(seventhSlot)}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── WIP category selector ──────────────────────────────────────────────────────
+
+function CategorySelector({
+  selected,
+  onChange,
+}: {
+  selected: HandCategory | null;
+  onChange: (cat: HandCategory | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5 pt-0.5">
+      {HAND_CATEGORIES.map((cat) => (
+        <button
+          key={cat}
+          onClick={() => onChange(selected === cat ? null : cat)}
+          className={cn(
+            "text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors",
+            selected === cat
+              ? "bg-slate-700 dark:bg-slate-200 text-white dark:text-slate-900 border-slate-700 dark:border-slate-200"
+              : "bg-transparent text-muted-foreground border-muted-foreground/30 hover:border-slate-400 hover:text-foreground"
+          )}
+        >
+          {CATEGORY_SHORT[cat]}
+          <span className="ml-1 opacity-60 font-normal">({CATEGORY_RANGE_PCT[cat]}%)</span>
+        </button>
+      ))}
+      {selected && (
+        <span className="text-xs text-muted-foreground self-center ml-1">
+          · {CATEGORY_LABELS[selected]}
+        </span>
       )}
     </div>
   );

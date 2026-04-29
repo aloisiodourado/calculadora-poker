@@ -7,6 +7,7 @@ export enum PokerVariant {
   Razz = "razz",
   SingleDraw27 = "2-7-single-draw",
   TripleDraw27 = "2-7-triple-draw",
+  TripleDraw27WIP = "2-7-td-wip",
   Badugi = "badugi",
 }
 

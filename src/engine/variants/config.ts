@@ -73,6 +73,15 @@ export const VARIANT_CONFIGS: Record<PokerVariant, VariantConfig> = {
     omahaRules: false,
     studGame: false,
   },
+  [PokerVariant.TripleDraw27WIP]: {
+    name: "2-7 Triple Draw WIP",
+    holeCards: 5,
+    communityCards: 0,
+    totalCards: 5,
+    evaluators: ["27low"],
+    omahaRules: false,
+    studGame: false,
+  },
   [PokerVariant.Badugi]: {
     name: "Badugi",
     holeCards: 4,

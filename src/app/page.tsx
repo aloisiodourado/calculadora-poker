@@ -1,12 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Card, Rank } from "@/engine/cards";
+import { Card, Rank, Suit, SUITS } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { getVariantConfig } from "@/engine/variants/config";
 import { SimulationResult, DrawRoundStrategy } from "@/engine/simulator/types";
-import { DEFAULT_DRAW_THRESHOLDS } from "@/engine/simulator/drawStrategy";
+import { DEFAULT_DRAW_THRESHOLDS, applyDrawStrategy } from "@/engine/simulator/drawStrategy";
+import { findTop10Rank, TOP_10_27 } from "@/lib/top10-27";
+import { HandCategory, buildStrategyAwareRepHand } from "@/lib/representative-hands-27td";
 import { VariantSelector } from "@/components/VariantSelector";
+import { PotOddsPanel } from "@/components/PotOddsPanel";
+import { Top10Panel } from "@/components/Top10Panel";
 import { HandInput } from "@/components/HandInput";
 import { BoardInput } from "@/components/BoardInput";
 import { Button } from "@/components/ui/button";
@@ -17,7 +21,8 @@ import { useDeckColor } from "@/contexts/DeckColorContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
-const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
+const DEFAULT_VARIANT = PokerVariant.TripleDraw27WIP;
+const TRIPLE_DRAW_WIP = PokerVariant.TripleDraw27WIP;
 const MAX_PLAYERS = 6;
 const TRIPLE_DRAW_SLOTS = 5;
 
@@ -36,6 +41,12 @@ function defaultStrategies(): DrawRoundStrategy[] {
 function emptyExplicitDiscards(): boolean[] {
   return Array(TRIPLE_DRAW_SLOTS).fill(false);
 }
+
+const POT_ODDS_DEFAULTS: Record<number, { pot: number; bet: number }> = {
+  3: { pot: 3.5, bet: 1 },
+  2: { pot: 5.5, bet: 1 },
+  1: { pot: 8.5, bet: 2 },
+};
 
 export default function Home() {
   const [variant, setVariant] = useState<PokerVariant>(DEFAULT_VARIANT);
@@ -59,11 +70,45 @@ export default function Home() {
     emptyExplicitDiscards(),
   ]);
 
+  const [handCategories, setHandCategories] = useState<(HandCategory | null)[]>([null, null]);
+  const [activePlayerIdx, setActivePlayerIdx] = useState<number | null>(null);
+
+  // Pot odds
+  const [pot, setPot] = useState<number>(POT_ODDS_DEFAULTS[3].pot);
+  const [bet, setBet] = useState<number>(POT_ODDS_DEFAULTS[3].bet);
+
+  const requiredEquity = useMemo(() => {
+    const denom = pot + bet;
+    return denom > 0 ? bet / denom : 0;
+  }, [pot, bet]);
+
   const config = useMemo(() => getVariantConfig(variant), [variant]);
   const isHiLo = config.evaluators.length === 2;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
+  const isTripleDrawWIP = variant === TRIPLE_DRAW_WIP;
+  const is27Low = isTripleDraw || isTripleDrawWIP || variant === PokerVariant.SingleDraw27;
   const { scheme, toggle } = useDeckColor();
   const { theme, toggle: toggleTheme } = useTheme();
+
+  const activeTop10Ranks = useMemo<Set<number>>(() => {
+    if (!is27Low) return new Set();
+    const result = new Set<number>();
+    hands.forEach((hand, playerIdx) => {
+      const known = hand.filter((c): c is Card => c !== null);
+      if (known.length === 0) return;
+      let kept = known;
+      if (isTripleDraw && drawRoundsLeft != null) {
+        const roundIdx = 3 - drawRoundsLeft;
+        const strategy = playerDrawStrategies[playerIdx]?.[roundIdx];
+        if (strategy) kept = applyDrawStrategy(known, strategy).keep;
+      }
+      if (kept.length !== 5) return;
+      const sortedRanks = kept.map((c) => c.rank).sort((a, b) => b - a);
+      const r = findTop10Rank(sortedRanks);
+      if (r !== -1) result.add(r);
+    });
+    return result;
+  }, [hands, is27Low, isTripleDraw, drawRoundsLeft, playerDrawStrategies]);
 
   const allSelectedCards = useMemo<Card[]>(() => {
     const cards: Card[] = [];
@@ -80,8 +125,67 @@ export default function Home() {
     setBoard(Array(newConfig.communityCards).fill(null));
     setDrawRoundsLeft(3);
     setPlayerExplicitDiscards((prev) => prev.map(() => emptyExplicitDiscards()));
+    setHandCategories((prev) => prev.map(() => null));
+    setActivePlayerIdx(null);
     setResult(null);
     setError(null);
+  }
+
+  function handleCategoryChange(playerIdx: number, category: HandCategory | null) {
+    setHandCategories((prev) => {
+      const next = [...prev];
+      next[playerIdx] = category;
+      return next;
+    });
+    if (category) {
+      const roundIdx = Math.max(0, Math.min(3 - drawRoundsLeft, 2));
+      const keepThreshold = playerDrawStrategies[playerIdx]?.[roundIdx]?.keepThreshold ?? Rank.Eight;
+      const { cards, explicitDiscards } = buildStrategyAwareRepHand(playerIdx, category, keepThreshold);
+      setHands((prev) => { const next = [...prev]; next[playerIdx] = cards; return next; });
+      setPlayerExplicitDiscards((prev) => { const next = [...prev]; next[playerIdx] = explicitDiscards; return next; });
+    } else {
+      setHands((prev) => { const next = [...prev]; next[playerIdx] = emptyHand(config.holeCards); return next; });
+      setPlayerExplicitDiscards((prev) => { const next = [...prev]; next[playerIdx] = emptyExplicitDiscards(); return next; });
+    }
+    setResult(null);
+  }
+
+  function handleTop10HandSelect(rankIdx: number) {
+    if (activePlayerIdx === null) return;
+    const ranks = TOP_10_27[rankIdx - 1];
+    if (!ranks) return;
+
+    const blocked = allSelectedCards.filter(
+      (c) => !hands[activePlayerIdx].some((h) => h?.rank === c.rank && h?.suit === c.suit)
+    );
+
+    const shuffledSuits = [...SUITS].sort(() => Math.random() - 0.5);
+    const suitCount: Record<string, number> = {};
+    const assigned: Card[] = [];
+
+    for (const rank of ranks) {
+      let picked: Card | null = null;
+      for (const suit of shuffledSuits) {
+        const card = { rank, suit };
+        const isBlocked = blocked.some((b) => b.rank === rank && b.suit === suit);
+        const suitUsed = (suitCount[suit] ?? 0);
+        if (!isBlocked && suitUsed < 4) {
+          picked = card;
+          suitCount[suit] = suitUsed + 1;
+          break;
+        }
+      }
+      if (!picked) return; // can't assign without conflict
+      assigned.push(picked);
+    }
+
+    // Clear category mode for this player
+    setHandCategories((prev) => { const next = [...prev]; next[activePlayerIdx] = null; return next; });
+    setHands((prev) => { const next = [...prev]; next[activePlayerIdx] = assigned; return next; });
+    setPlayerExplicitDiscards((prev) => { const next = [...prev]; next[activePlayerIdx] = emptyExplicitDiscards(); return next; });
+    setDiscards((prev) => { const next = [...prev]; next[activePlayerIdx] = emptyDiscards(config.holeCards); return next; });
+    setActivePlayerIdx(null);
+    setResult(null);
   }
 
   function handleHandCardChange(handIdx: number, cardIdx: number, card: Card | null) {
@@ -136,6 +240,14 @@ export default function Home() {
       next[playerIdx][roundIdx] = { keepThreshold };
       return next;
     });
+    // Recompute representative hand if this player is in category mode
+    // and the affected round is the current draw round
+    const currentRoundIdx = Math.max(0, Math.min(3 - drawRoundsLeft, 2));
+    if (handCategories[playerIdx] && roundIdx === currentRoundIdx) {
+      const { cards, explicitDiscards } = buildStrategyAwareRepHand(playerIdx, handCategories[playerIdx]!, keepThreshold);
+      setHands((prev) => { const next = [...prev]; next[playerIdx] = cards; return next; });
+      setPlayerExplicitDiscards((prev) => { const next = [...prev]; next[playerIdx] = explicitDiscards; return next; });
+    }
     setResult(null);
   }
 
@@ -145,6 +257,7 @@ export default function Home() {
     setDiscards((prev) => [...prev, emptyDiscards(config.holeCards)]);
     setPlayerDrawStrategies((prev) => [...prev, defaultStrategies()]);
     setPlayerExplicitDiscards((prev) => [...prev, emptyExplicitDiscards()]);
+    setHandCategories((prev) => [...prev, null]);
     setResult(null);
   }
 
@@ -154,6 +267,8 @@ export default function Home() {
     setDiscards((prev) => prev.filter((_, i) => i !== idx));
     setPlayerDrawStrategies((prev) => prev.filter((_, i) => i !== idx));
     setPlayerExplicitDiscards((prev) => prev.filter((_, i) => i !== idx));
+    setHandCategories((prev) => prev.filter((_, i) => i !== idx));
+    if (activePlayerIdx === idx) setActivePlayerIdx(null);
     setResult(null);
   }
 
@@ -175,7 +290,7 @@ export default function Home() {
         iterations,
       };
 
-      if (isTripleDraw) {
+      if (isTripleDraw || isTripleDrawWIP) {
         body.drawRoundsLeft = drawRoundsLeft;
         body.playerDrawStrategies = playerDrawStrategies;
         body.playerExplicitDiscards = playerExplicitDiscards;
@@ -228,7 +343,9 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-5">
+      <main className="max-w-6xl mx-auto px-4 py-6 flex items-start">
+        <div className="basis-2/3 min-w-0 space-y-5 pr-6">
+
         <div className="flex items-end gap-4 flex-wrap">
           <VariantSelector value={variant} onChange={handleVariantChange} />
           <div className="text-xs text-muted-foreground pb-1">
@@ -236,8 +353,13 @@ export default function Home() {
             {config.communityCards > 0 ? ` · ${config.communityCards} community cards` : " · no board"}
             {isHiLo && " · Hi-Lo split"}
           </div>
-          {isTripleDraw && (
-            <DrawsLeftSelector value={drawRoundsLeft} onChange={(v) => { setDrawRoundsLeft(v); setResult(null); }} />
+          {(isTripleDraw || isTripleDrawWIP) && (
+            <DrawsLeftSelector value={drawRoundsLeft} onChange={(v) => {
+              setDrawRoundsLeft(v);
+              const defaults = POT_ODDS_DEFAULTS[v];
+              if (defaults) { setPot(defaults.pot); setBet(defaults.bet); }
+              setResult(null);
+            }} />
           )}
         </div>
 
@@ -253,87 +375,117 @@ export default function Home() {
           />
         )}
 
-        <div className="space-y-3">
-          {hands.map((hand, i) => {
-            const otherCards = allSelectedCards.filter(
-              (c) => !hand.some((h) => h?.rank === c.rank && h?.suit === c.suit)
-            );
-            return (
-              <HandInput
-                key={i}
-                handIndex={i}
-                cards={hand}
-                discards={discards[i]}
-                holeCardCount={config.holeCards}
-                blockedCards={otherCards}
-                boardCards={board}
-                variant={variant}
-                config={config}
-                result={result?.results[i]}
-                isHiLo={isHiLo}
-                iterationsRun={result?.iterationsRun}
-                drawRoundsLeft={isTripleDraw ? drawRoundsLeft : undefined}
-                drawStrategies={isTripleDraw ? playerDrawStrategies[i] : undefined}
-                explicitDiscards={(isTripleDraw || variant === PokerVariant.SingleDraw27) ? playerExplicitDiscards[i] : undefined}
-                onCardChange={(cardIdx, card) => handleHandCardChange(i, cardIdx, card)}
-                onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
-                onDrawStrategyChange={(roundIdx, threshold) =>
-                  handleDrawStrategyChange(i, roundIdx, threshold)
-                }
-                onExplicitDiscardToggle={(slotIdx) => handleExplicitDiscardToggle(i, slotIdx)}
-                onRemove={() => removePlayer(i)}
-                canRemove={hands.length > 2}
+        {/* Sidebar (calculate + pot odds) alongside player hands */}
+        <div className="flex gap-4 items-start">
+
+          {/* Left sidebar */}
+          <div className="shrink-0 w-64 space-y-3">
+            <div className="rounded-xl border bg-card p-3 space-y-2.5">
+              <Button onClick={calculate} disabled={loading} className="w-full" size="sm">
+                {loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Calculando…
+                  </>
+                ) : (
+                  "Calculate Equity"
+                )}
+              </Button>
+              <div className="flex items-center gap-2">
+                <label htmlFor="iterations-select" className="text-xs text-muted-foreground whitespace-nowrap">
+                  Iterações:
+                </label>
+                <select
+                  id="iterations-select"
+                  value={iterations}
+                  onChange={(e) => setIterations(Number(e.target.value))}
+                  className="text-xs font-medium border rounded px-2 py-1 bg-background cursor-pointer focus:outline-none"
+                >
+                  {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((n) => (
+                    <option key={n} value={n * 1000}>{n}k</option>
+                  ))}
+                </select>
+              </div>
+              {error && <p className="text-xs text-destructive">{error}</p>}
+              {result && (
+                <p className="text-xs text-muted-foreground">
+                  {result.iterationsRun.toLocaleString()} iter. · {result.durationMs}ms
+                </p>
+              )}
+            </div>
+
+            {isTripleDrawWIP && (
+              <PotOddsPanel
+                pot={pot}
+                bet={bet}
+                onPotChange={setPot}
+                onBetChange={setBet}
+                requiredEquity={requiredEquity}
+                playerEquities={result?.results.map((r) => r.equity)}
               />
-            );
-          })}
-        </div>
-
-        <div className="flex gap-3 flex-wrap items-center">
-          {hands.length < MAX_PLAYERS && (
-            <Button variant="outline" size="sm" onClick={addPlayer}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Player
-            </Button>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <label htmlFor="iterations-select" className="text-xs text-muted-foreground whitespace-nowrap">
-              Iterações:
-            </label>
-            <select
-              id="iterations-select"
-              value={iterations}
-              onChange={(e) => setIterations(Number(e.target.value))}
-              className="text-xs font-medium border rounded px-2 py-1 bg-background cursor-pointer focus:outline-none"
-            >
-              {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((n) => (
-                <option key={n} value={n * 1000}>
-                  {n}k
-                </option>
-              ))}
-            </select>
-          </div>
-          <Button onClick={calculate} disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Calculating…
-              </>
-            ) : (
-              "Calculate Equity"
             )}
-          </Button>
+          </div>
+
+          {/* Player hands */}
+          <div className="flex-1 min-w-0 space-y-3">
+            {hands.map((hand, i) => {
+              const otherCards = allSelectedCards.filter(
+                (c) => !hand.some((h) => h?.rank === c.rank && h?.suit === c.suit)
+              );
+              return (
+                <HandInput
+                  key={i}
+                  handIndex={i}
+                  cards={hand}
+                  discards={discards[i]}
+                  holeCardCount={config.holeCards}
+                  blockedCards={otherCards}
+                  boardCards={board}
+                  variant={variant}
+                  config={config}
+                  result={result?.results[i]}
+                  isHiLo={isHiLo}
+                  iterationsRun={result?.iterationsRun}
+                  drawRoundsLeft={(isTripleDraw || isTripleDrawWIP) ? drawRoundsLeft : undefined}
+                  drawStrategies={(isTripleDraw || isTripleDrawWIP) ? playerDrawStrategies[i] : undefined}
+                  explicitDiscards={(isTripleDraw || isTripleDrawWIP || variant === PokerVariant.SingleDraw27) ? playerExplicitDiscards[i] : undefined}
+                  handCategory={isTripleDrawWIP ? (handCategories[i] ?? null) : null}
+                  isActive={activePlayerIdx === i}
+                  onCardChange={(cardIdx, card) => {
+                    if (isTripleDrawWIP && handCategories[i]) handleCategoryChange(i, null);
+                    handleHandCardChange(i, cardIdx, card);
+                  }}
+                  onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
+                  onDrawStrategyChange={(roundIdx, threshold) =>
+                    handleDrawStrategyChange(i, roundIdx, threshold)
+                  }
+                  onExplicitDiscardToggle={(slotIdx) => handleExplicitDiscardToggle(i, slotIdx)}
+                  onCategoryChange={isTripleDrawWIP ? (cat) => handleCategoryChange(i, cat) : undefined}
+                  onSetActive={() => setActivePlayerIdx(activePlayerIdx === i ? null : i)}
+                  onRemove={() => removePlayer(i)}
+                  canRemove={hands.length > 2}
+                />
+              );
+            })}
+
+            {hands.length < MAX_PLAYERS && (
+              <Button variant="outline" size="sm" onClick={addPlayer}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add Player
+              </Button>
+            )}
+          </div>
+        </div>
         </div>
 
-        {error && (
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            {error}
+        {is27Low && (
+          <div className="basis-1/3 flex justify-center pt-0">
+            <Top10Panel
+              activeRanks={activeTop10Ranks}
+              selectableForPlayer={activePlayerIdx !== null ? activePlayerIdx + 1 : null}
+              onHandSelect={handleTop10HandSelect}
+            />
           </div>
-        )}
-
-        {result && (
-          <p className="text-xs text-center text-muted-foreground">
-            {result.iterationsRun.toLocaleString()} iterações · {result.durationMs}ms
-          </p>
         )}
       </main>
     </div>

@@ -26,7 +26,7 @@ const VARIANT_GROUPS = [
   },
   {
     label: "Lowball",
-    variants: [PokerVariant.Razz, PokerVariant.SingleDraw27, PokerVariant.TripleDraw27],
+    variants: [PokerVariant.Razz, PokerVariant.SingleDraw27, PokerVariant.TripleDraw27, PokerVariant.TripleDraw27WIP],
   },
   {
     label: "Other",

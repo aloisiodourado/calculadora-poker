@@ -11,6 +11,7 @@ import { HandRank } from "@/engine/evaluators/types";
 import { evaluateBadugi, bestBadugiHand } from "@/engine/evaluators/BadugiEvaluator";
 import { applyDrawStrategy } from "@/engine/simulator/drawStrategy";
 import { DrawRoundStrategy } from "@/engine/simulator/types";
+import { findTop10Rank } from "@/lib/top10-27";
 import { cn } from "@/lib/utils";
 
 const hiEval = new HighHandEvaluator();
@@ -18,20 +19,6 @@ const a5Eval = new AceToFiveLowEvaluator();
 const d7Eval = new DeuceSevenEvaluator();
 
 const OMAHA_VARIANTS = [PokerVariant.OmahaHi, PokerVariant.OmahaHiLo];
-
-// Top 10 hands in 2-7 lowball, ranks sorted descending.
-const TOP_10_27: number[][] = [
-  [7, 5, 4, 3, 2], // #1
-  [7, 6, 4, 3, 2], // #2
-  [7, 6, 5, 3, 2], // #3
-  [7, 6, 5, 4, 2], // #4
-  [8, 5, 4, 3, 2], // #5
-  [8, 6, 4, 3, 2], // #6
-  [8, 6, 5, 3, 2], // #7
-  [8, 6, 5, 4, 2], // #8
-  [8, 6, 5, 4, 3], // #9
-  [8, 7, 4, 3, 2], // #10
-];
 
 const RANK_SHORT: Record<number, string> = {
   2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8",
@@ -67,8 +54,8 @@ function get27Label(knownHole: Card[], drawStrategy?: DrawRoundStrategy): string
   let label = `${r1}-${r2} High`;
 
   const sortedRanks = sorted.map((c) => c.rank);
-  const rankIdx = TOP_10_27.findIndex((top) => top.every((r, i) => r === sortedRanks[i]));
-  if (rankIdx !== -1) label += ` · #${rankIdx + 1}`;
+  const rankIdx = findTop10Rank(sortedRanks);
+  if (rankIdx !== -1) label += ` · #${rankIdx}`;
 
   return label;
 }

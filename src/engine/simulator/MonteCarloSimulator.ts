@@ -12,6 +12,7 @@ import { getVariantConfig } from "../variants/config";
 import { EvaluatorType, PokerVariant } from "../variants/types";
 import { HandResult, SimulationInput, SimulationResult, SimulatorEngine } from "./types";
 import { evaluateOmahaHand } from "./OmahaEvaluator";
+import { applyDrawStrategy, DrawRoundStrategy, DEFAULT_DRAW_THRESHOLDS } from "./drawStrategy";
 
 const evaluatorInstances = {
   high: new HighHandEvaluator(),
@@ -89,6 +90,10 @@ export class MonteCarloSimulator implements SimulatorEngine {
     const { variant, hands, board, iterations } = input;
     const config = getVariantConfig(variant);
     const isHiLo = config.evaluators.length === 2;
+    const isTripleDraw =
+      variant === PokerVariant.TripleDraw27 &&
+      input.drawRoundsLeft != null &&
+      input.drawRoundsLeft > 0;
 
     const results: HandResult[] = hands.map((hand) => ({
       hand,
@@ -105,14 +110,24 @@ export class MonteCarloSimulator implements SimulatorEngine {
 
     for (let i = 0; i < iterations; i++) {
       const deck = shuffle(removeCards(createDeck(), knownCards));
-      const { completedHands, completedBoard } = completeHands(
-        hands, board, deck, config
-      );
 
-      if (isHiLo) {
-        this.runHiLoIteration(completedHands, completedBoard, config, results);
+      if (isTripleDraw) {
+        const finalHands = this.simulateDrawRounds(
+          hands,
+          deck,
+          input.drawRoundsLeft!,
+          input.playerDrawStrategies
+        );
+        this.runStandardIteration(finalHands, [], config, results);
       } else {
-        this.runStandardIteration(completedHands, completedBoard, config, results);
+        const { completedHands, completedBoard } = completeHands(
+          hands, board, deck, config
+        );
+        if (isHiLo) {
+          this.runHiLoIteration(completedHands, completedBoard, config, results);
+        } else {
+          this.runStandardIteration(completedHands, completedBoard, config, results);
+        }
       }
     }
 
@@ -125,6 +140,56 @@ export class MonteCarloSimulator implements SimulatorEngine {
       iterationsRun: iterations,
       durationMs: Date.now() - start,
     };
+  }
+
+  /**
+   * Simulate drawRoundsLeft draw rounds for all players.
+   * Returns the final 5-card hands after all draws.
+   */
+  private simulateDrawRounds(
+    startingHands: Card[][],
+    deck: Card[],
+    drawRoundsLeft: number,
+    playerStrategies?: DrawRoundStrategy[][]
+  ): Card[][] {
+    // ptr walks sequentially through the shuffled deck
+    let ptr = 0;
+
+    // Step 1: fill each hand to 5 cards (in case some cards are unknown)
+    const hands = startingHands.map((hand) => {
+      const completed = [...hand];
+      while (completed.length < 5 && ptr < deck.length) {
+        completed.push(deck[ptr++]);
+      }
+      return completed;
+    });
+
+    // The first draw round index into the strategy array
+    // e.g. drawRoundsLeft=2 → start at index 1 (use strategies[1] and strategies[2])
+    const startIdx = 3 - drawRoundsLeft;
+
+    // Step 2: simulate each draw round
+    for (let round = 0; round < drawRoundsLeft; round++) {
+      const stratIdx = startIdx + round;
+
+      for (let p = 0; p < hands.length; p++) {
+        const strategy: DrawRoundStrategy = playerStrategies?.[p]?.[stratIdx] ?? {
+          keepThreshold: DEFAULT_DRAW_THRESHOLDS[stratIdx],
+        };
+
+        const { keep } = applyDrawStrategy(hands[p], strategy);
+        const numDraw = 5 - keep.length;
+        const drawn: Card[] = [];
+
+        for (let d = 0; d < numDraw; d++) {
+          if (ptr < deck.length) drawn.push(deck[ptr++]);
+        }
+
+        hands[p] = [...keep, ...drawn];
+      }
+    }
+
+    return hands;
   }
 
   private runStandardIteration(

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Card } from "@/engine/cards";
+import { Card, Rank } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { getVariantConfig } from "@/engine/variants/config";
-import { SimulationResult } from "@/engine/simulator/types";
+import { SimulationResult, DrawRoundStrategy } from "@/engine/simulator/types";
+import { DEFAULT_DRAW_THRESHOLDS } from "@/engine/simulator/drawStrategy";
 import { VariantSelector } from "@/components/VariantSelector";
 import { HandInput } from "@/components/HandInput";
 import { BoardInput } from "@/components/BoardInput";
@@ -13,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Loader2, Plus } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useDeckColor } from "@/contexts/DeckColorContext";
+import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
 const DEFAULT_VARIANT = PokerVariant.TexasHoldem;
 const MAX_PLAYERS = 6;
@@ -25,6 +27,10 @@ function emptyDiscards(size: number): boolean[] {
   return Array(size).fill(false);
 }
 
+function defaultStrategies(): DrawRoundStrategy[] {
+  return DEFAULT_DRAW_THRESHOLDS.map((keepThreshold) => ({ keepThreshold }));
+}
+
 export default function Home() {
   const [variant, setVariant] = useState<PokerVariant>(DEFAULT_VARIANT);
   const [hands, setHands] = useState<(Card | null)[][]>([emptyHand(2), emptyHand(2)]);
@@ -34,8 +40,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Triple Draw 2-7 specific state
+  const [drawRoundsLeft, setDrawRoundsLeft] = useState(3);
+  const [playerDrawStrategies, setPlayerDrawStrategies] = useState<DrawRoundStrategy[][]>([
+    defaultStrategies(),
+    defaultStrategies(),
+  ]);
+
   const config = useMemo(() => getVariantConfig(variant), [variant]);
   const isHiLo = config.evaluators.length === 2;
+  const isTripleDraw = variant === PokerVariant.TripleDraw27;
   const { scheme, toggle } = useDeckColor();
 
   const allSelectedCards = useMemo<Card[]>(() => {
@@ -51,6 +65,7 @@ export default function Home() {
     setHands((prev) => prev.map(() => emptyHand(newConfig.holeCards)));
     setDiscards((prev) => prev.map(() => emptyDiscards(newConfig.holeCards)));
     setBoard(Array(newConfig.communityCards).fill(null));
+    setDrawRoundsLeft(3);
     setResult(null);
     setError(null);
   }
@@ -85,10 +100,20 @@ export default function Home() {
     setResult(null);
   }
 
+  function handleDrawStrategyChange(playerIdx: number, roundIdx: number, keepThreshold: Rank) {
+    setPlayerDrawStrategies((prev) => {
+      const next = prev.map((s) => [...s]);
+      next[playerIdx][roundIdx] = { keepThreshold };
+      return next;
+    });
+    setResult(null);
+  }
+
   function addPlayer() {
     if (hands.length >= MAX_PLAYERS) return;
     setHands((prev) => [...prev, emptyHand(config.holeCards)]);
     setDiscards((prev) => [...prev, emptyDiscards(config.holeCards)]);
+    setPlayerDrawStrategies((prev) => [...prev, defaultStrategies()]);
     setResult(null);
   }
 
@@ -96,6 +121,7 @@ export default function Home() {
     if (hands.length <= 2) return;
     setHands((prev) => prev.filter((_, i) => i !== idx));
     setDiscards((prev) => prev.filter((_, i) => i !== idx));
+    setPlayerDrawStrategies((prev) => prev.filter((_, i) => i !== idx));
     setResult(null);
   }
 
@@ -110,10 +136,22 @@ export default function Home() {
     const boardData = board.filter((c): c is Card => c !== null);
 
     try {
+      const body: Record<string, unknown> = {
+        variant,
+        hands: handData,
+        board: boardData,
+        iterations: 10_000,
+      };
+
+      if (isTripleDraw) {
+        body.drawRoundsLeft = drawRoundsLeft;
+        body.playerDrawStrategies = playerDrawStrategies;
+      }
+
       const res = await fetch("/api/equity", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ variant, hands: handData, board: boardData, iterations: 10_000 }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Unknown error");
@@ -154,6 +192,9 @@ export default function Home() {
             {config.communityCards > 0 ? ` · ${config.communityCards} community cards` : " · no board"}
             {isHiLo && " · Hi-Lo split"}
           </div>
+          {isTripleDraw && (
+            <DrawsLeftSelector value={drawRoundsLeft} onChange={(v) => { setDrawRoundsLeft(v); setResult(null); }} />
+          )}
         </div>
 
         <Separator />
@@ -187,8 +228,13 @@ export default function Home() {
                 result={result?.results[i]}
                 isHiLo={isHiLo}
                 iterationsRun={result?.iterationsRun}
+                drawRoundsLeft={isTripleDraw ? drawRoundsLeft : undefined}
+                drawStrategies={isTripleDraw ? playerDrawStrategies[i] : undefined}
                 onCardChange={(cardIdx, card) => handleHandCardChange(i, cardIdx, card)}
                 onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
+                onDrawStrategyChange={(roundIdx, threshold) =>
+                  handleDrawStrategyChange(i, roundIdx, threshold)
+                }
                 onRemove={() => removePlayer(i)}
                 canRemove={hands.length > 2}
               />

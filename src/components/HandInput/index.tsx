@@ -28,21 +28,21 @@ export const PLAYER_COLORS = [
 ];
 
 const HAND_BORDERS = [
-  "border-blue-300",
-  "border-emerald-300",
-  "border-violet-300",
-  "border-amber-300",
-  "border-rose-300",
-  "border-cyan-300",
+  "border-blue-300 dark:border-blue-700",
+  "border-emerald-300 dark:border-emerald-700",
+  "border-violet-300 dark:border-violet-700",
+  "border-amber-300 dark:border-amber-700",
+  "border-rose-300 dark:border-rose-700",
+  "border-cyan-300 dark:border-cyan-700",
 ];
 
 const HAND_BG = [
-  "bg-blue-50/60",
-  "bg-emerald-50/60",
-  "bg-violet-50/60",
-  "bg-amber-50/60",
-  "bg-rose-50/60",
-  "bg-cyan-50/60",
+  "bg-blue-50/60 dark:bg-blue-950/30",
+  "bg-emerald-50/60 dark:bg-emerald-950/30",
+  "bg-violet-50/60 dark:bg-violet-950/30",
+  "bg-amber-50/60 dark:bg-amber-950/30",
+  "bg-rose-50/60 dark:bg-rose-950/30",
+  "bg-cyan-50/60 dark:bg-cyan-950/30",
 ];
 
 // Stud street labels: cards 0-1 = hole, 2-5 = streets 3-6, 6 = 7th (down)

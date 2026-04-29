@@ -11,9 +11,10 @@ import { HandInput } from "@/components/HandInput";
 import { BoardInput } from "@/components/BoardInput";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Moon, Sun } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useDeckColor } from "@/contexts/DeckColorContext";
+import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
 const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
@@ -42,6 +43,7 @@ export default function Home() {
   const [hands, setHands] = useState<(Card | null)[][]>([emptyHand(defaultConfig.holeCards), emptyHand(defaultConfig.holeCards)]);
   const [discards, setDiscards] = useState<boolean[][]>([emptyDiscards(defaultConfig.holeCards), emptyDiscards(defaultConfig.holeCards)]);
   const [board, setBoard] = useState<(Card | null)[]>(Array(defaultConfig.communityCards).fill(null));
+  const [iterations, setIterations] = useState(50_000);
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export default function Home() {
   const isHiLo = config.evaluators.length === 2;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
   const { scheme, toggle } = useDeckColor();
+  const { theme, toggle: toggleTheme } = useTheme();
 
   const allSelectedCards = useMemo<Card[]>(() => {
     const cards: Card[] = [];
@@ -169,7 +172,7 @@ export default function Home() {
         variant,
         hands: handData,
         board: boardData,
-        iterations: 10_000,
+        iterations,
       };
 
       if (isTripleDraw) {
@@ -202,15 +205,26 @@ export default function Home() {
             Compare hand equities via Monte Carlo simulation
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground select-none">
-            {scheme === "4color" ? "4 cores" : "2 cores"}
-          </span>
-          <Switch
-            checked={scheme === "4color"}
-            onCheckedChange={toggle}
-            aria-label="Alternar esquema de cores do baralho"
-          />
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground select-none">
+              {scheme === "4color" ? "4 cores" : "2 cores"}
+            </span>
+            <Switch
+              checked={scheme === "4color"}
+              onCheckedChange={toggle}
+              aria-label="Alternar esquema de cores do baralho"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Sun className="h-3.5 w-3.5 text-muted-foreground" />
+            <Switch
+              checked={theme === "dark"}
+              onCheckedChange={toggleTheme}
+              aria-label="Alternar tema escuro"
+            />
+            <Moon className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
         </div>
       </header>
 
@@ -274,14 +288,31 @@ export default function Home() {
           })}
         </div>
 
-        <div className="flex gap-3 flex-wrap">
+        <div className="flex gap-3 flex-wrap items-center">
           {hands.length < MAX_PLAYERS && (
             <Button variant="outline" size="sm" onClick={addPlayer}>
               <Plus className="h-4 w-4 mr-1" />
               Add Player
             </Button>
           )}
-          <Button onClick={calculate} disabled={loading} className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <label htmlFor="iterations-select" className="text-xs text-muted-foreground whitespace-nowrap">
+              Iterações:
+            </label>
+            <select
+              id="iterations-select"
+              value={iterations}
+              onChange={(e) => setIterations(Number(e.target.value))}
+              className="text-xs font-medium border rounded px-2 py-1 bg-background cursor-pointer focus:outline-none"
+            >
+              {[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((n) => (
+                <option key={n} value={n * 1000}>
+                  {n}k
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button onClick={calculate} disabled={loading}>
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

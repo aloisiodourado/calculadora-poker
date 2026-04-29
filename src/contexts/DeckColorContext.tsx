@@ -6,17 +6,17 @@ import { Suit } from "@/engine/cards";
 export type DeckColorScheme = "4color" | "2color";
 
 export const SUIT_COLORS_4: Record<Suit, string> = {
-  [Suit.Spades]:   "text-slate-900",
-  [Suit.Hearts]:   "text-red-600",
-  [Suit.Diamonds]: "text-blue-600",
-  [Suit.Clubs]:    "text-green-700",
+  [Suit.Spades]:   "text-slate-900 dark:text-slate-100",
+  [Suit.Hearts]:   "text-red-600 dark:text-red-400",
+  [Suit.Diamonds]: "text-blue-600 dark:text-blue-400",
+  [Suit.Clubs]:    "text-green-700 dark:text-green-500",
 };
 
 export const SUIT_COLORS_2: Record<Suit, string> = {
-  [Suit.Spades]:   "text-slate-900",
-  [Suit.Hearts]:   "text-red-600",
-  [Suit.Diamonds]: "text-red-600",
-  [Suit.Clubs]:    "text-slate-900",
+  [Suit.Spades]:   "text-slate-900 dark:text-slate-100",
+  [Suit.Hearts]:   "text-red-600 dark:text-red-400",
+  [Suit.Diamonds]: "text-red-600 dark:text-red-400",
+  [Suit.Clubs]:    "text-slate-900 dark:text-slate-100",
 };
 
 interface DeckColorContextValue {

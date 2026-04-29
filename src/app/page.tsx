@@ -21,8 +21,7 @@ import { useDeckColor } from "@/contexts/DeckColorContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
-const DEFAULT_VARIANT = PokerVariant.TripleDraw27WIP;
-const TRIPLE_DRAW_WIP = PokerVariant.TripleDraw27WIP;
+const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
 const MAX_PLAYERS = 6;
 const TRIPLE_DRAW_SLOTS = 5;
 
@@ -85,8 +84,7 @@ export default function Home() {
   const config = useMemo(() => getVariantConfig(variant), [variant]);
   const isHiLo = config.evaluators.length === 2;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
-  const isTripleDrawWIP = variant === TRIPLE_DRAW_WIP;
-  const is27Low = isTripleDraw || isTripleDrawWIP || variant === PokerVariant.SingleDraw27;
+  const is27Low = isTripleDraw || variant === PokerVariant.SingleDraw27;
   const { scheme, toggle } = useDeckColor();
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -290,7 +288,7 @@ export default function Home() {
         iterations,
       };
 
-      if (isTripleDraw || isTripleDrawWIP) {
+      if (isTripleDraw) {
         body.drawRoundsLeft = drawRoundsLeft;
         body.playerDrawStrategies = playerDrawStrategies;
         body.playerExplicitDiscards = playerExplicitDiscards;
@@ -353,7 +351,7 @@ export default function Home() {
             {config.communityCards > 0 ? ` · ${config.communityCards} community cards` : " · no board"}
             {isHiLo && " · Hi-Lo split"}
           </div>
-          {(isTripleDraw || isTripleDrawWIP) && (
+          {isTripleDraw && (
             <DrawsLeftSelector value={drawRoundsLeft} onChange={(v) => {
               setDrawRoundsLeft(v);
               const defaults = POT_ODDS_DEFAULTS[v];
@@ -414,7 +412,7 @@ export default function Home() {
               )}
             </div>
 
-            {isTripleDrawWIP && (
+            {isTripleDraw && (
               <PotOddsPanel
                 pot={pot}
                 bet={bet}
@@ -446,13 +444,13 @@ export default function Home() {
                   result={result?.results[i]}
                   isHiLo={isHiLo}
                   iterationsRun={result?.iterationsRun}
-                  drawRoundsLeft={(isTripleDraw || isTripleDrawWIP) ? drawRoundsLeft : undefined}
-                  drawStrategies={(isTripleDraw || isTripleDrawWIP) ? playerDrawStrategies[i] : undefined}
-                  explicitDiscards={(isTripleDraw || isTripleDrawWIP || variant === PokerVariant.SingleDraw27) ? playerExplicitDiscards[i] : undefined}
-                  handCategory={isTripleDrawWIP ? (handCategories[i] ?? null) : null}
+                  drawRoundsLeft={isTripleDraw ? drawRoundsLeft : undefined}
+                  drawStrategies={isTripleDraw ? playerDrawStrategies[i] : undefined}
+                  explicitDiscards={(isTripleDraw || variant === PokerVariant.SingleDraw27) ? playerExplicitDiscards[i] : undefined}
+                  handCategory={isTripleDraw ? (handCategories[i] ?? null) : null}
                   isActive={activePlayerIdx === i}
                   onCardChange={(cardIdx, card) => {
-                    if (isTripleDrawWIP && handCategories[i]) handleCategoryChange(i, null);
+                    if (isTripleDraw && handCategories[i]) handleCategoryChange(i, null);
                     handleHandCardChange(i, cardIdx, card);
                   }}
                   onDiscardToggle={(cardIdx) => handleDiscardToggle(i, cardIdx)}
@@ -460,7 +458,7 @@ export default function Home() {
                     handleDrawStrategyChange(i, roundIdx, threshold)
                   }
                   onExplicitDiscardToggle={(slotIdx) => handleExplicitDiscardToggle(i, slotIdx)}
-                  onCategoryChange={isTripleDrawWIP ? (cat) => handleCategoryChange(i, cat) : undefined}
+                  onCategoryChange={isTripleDraw ? (cat) => handleCategoryChange(i, cat) : undefined}
                   onSetActive={() => setActivePlayerIdx(activePlayerIdx === i ? null : i)}
                   onRemove={() => removePlayer(i)}
                   canRemove={hands.length > 2}

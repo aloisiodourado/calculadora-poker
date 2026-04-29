@@ -91,7 +91,7 @@ export class MonteCarloSimulator implements SimulatorEngine {
     const config = getVariantConfig(variant);
     const isHiLo = config.evaluators.length === 2;
     const isTripleDraw =
-      (variant === PokerVariant.TripleDraw27 || variant === PokerVariant.TripleDraw27WIP) &&
+      variant === PokerVariant.TripleDraw27 &&
       input.drawRoundsLeft != null &&
       input.drawRoundsLeft > 0;
 

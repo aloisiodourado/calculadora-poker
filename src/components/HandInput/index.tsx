@@ -71,7 +71,6 @@ const STUD_LABELS = [
 const DRAW_VARIANTS = [
   PokerVariant.SingleDraw27,
   PokerVariant.TripleDraw27,
-  PokerVariant.TripleDraw27WIP,
   PokerVariant.Badugi,
 ];
 
@@ -141,12 +140,11 @@ export function HandInput({
   const isDraw = DRAW_VARIANTS.includes(variant);
   const isBadugi = variant === PokerVariant.Badugi;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
-  const isTripleDrawWIP = variant === PokerVariant.TripleDraw27WIP;
   const isSingleDraw27 = variant === PokerVariant.SingleDraw27;
-  const showEmptyDiscardCheckboxes = isTripleDraw || isTripleDrawWIP || isSingleDraw27;
-  const inCategoryMode = isTripleDrawWIP && !!handCategory;
+  const showEmptyDiscardCheckboxes = isTripleDraw || isSingleDraw27;
+  const inCategoryMode = isTripleDraw && !!handCategory;
 
-  const currentRoundIdx = (isTripleDraw || isTripleDrawWIP) && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
+  const currentRoundIdx = isTripleDraw && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
   const currentDrawStrategy =
     currentRoundIdx != null && drawStrategies ? drawStrategies[currentRoundIdx] : undefined;
 
@@ -217,7 +215,7 @@ export function HandInput({
       </div>
 
       {/* WIP category selector */}
-      {isTripleDrawWIP && onCategoryChange && (
+      {isTripleDraw && onCategoryChange && (
         <CategorySelector
           selected={handCategory ?? null}
           onChange={onCategoryChange}
@@ -240,7 +238,7 @@ export function HandInput({
           cards={cards}
           discards={discards}
           isBadugi={isBadugi}
-          isTripleDraw={isTripleDraw || isTripleDrawWIP}
+          isTripleDraw={isTripleDraw}
           showEmptyDiscardCheckboxes={showEmptyDiscardCheckboxes}
           isBadugiValid={isBadugiValid}
           explicitDiscards={explicitDiscards}
@@ -252,7 +250,7 @@ export function HandInput({
       )}
 
       {/* Triple Draw strategy config */}
-      {(isTripleDraw || isTripleDrawWIP) && drawRoundsLeft != null && drawStrategies && (
+      {isTripleDraw && drawRoundsLeft != null && drawStrategies && (
         <TripleDrawStrategy
           drawRoundsLeft={drawRoundsLeft}
           strategies={drawStrategies}

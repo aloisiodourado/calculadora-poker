@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import { Card } from "@/engine/cards";
+import { Card, Rank, RANKS, SUITS } from "@/engine/cards";
 import type { Street, Position, BetAction, DrawCount } from "@/solver/game/types";
 import { infoSetKey, drawInfoSetKey } from "@/solver/game/types";
 import {
@@ -15,14 +15,20 @@ import { createTables, initSolver, runIterations } from "@/solver/cfr/trainer";
 import type { SolverTables } from "@/solver/cfr/trainer";
 import { handToBucket, NUM_BUCKETS } from "@/solver/abstraction/handBuckets";
 import { averageStrategy, averageDrawStrategy } from "@/solver/cfr/strategy";
-import { CardPicker } from "@/components/CardPicker";
 import { Button } from "@/components/ui/button";
-import { Loader2, RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
+import { Loader2, RotateCcw, ChevronDown, ChevronRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDeckColor } from "@/contexts/DeckColorContext";
+import { RANK_LABELS, SUIT_SYMBOLS } from "@/components/CardPicker";
+
+// ── Constants ──────────────────────────────────────────────────────────────────
 
 const TRAIN_ITERATIONS = 30_000;
 const BUCKET_SAMPLES = 20_000;
 const TRANSITION_SAMPLES = 200;
+const HAND_SIZE = 5;
+
+const DISPLAY_SUITS = [SUITS[0], SUITS[2], SUITS[1], SUITS[3]] as typeof SUITS; // ♠♥♦♣
 
 const STREET_LABELS: Record<Street, string> = {
   0: "Pré-draw (antes do 1º descarte)",
@@ -60,26 +66,188 @@ function bettingDone(seq: BetAction[], toCall: number): boolean {
   return last === "check" || last === "call";
 }
 
+// ── Multi-slot hand picker ─────────────────────────────────────────────────────
+// Inline card grid that appears below the slot row. Clicking any slot focuses
+// it; selecting a card fills that slot and auto-advances to the next empty one.
+
+function HandPicker({
+  hand,
+  onChange,
+}: {
+  hand: (Card | null)[];
+  onChange: (idx: number, card: Card | null) => void;
+}) {
+  const { suitColors } = useDeckColor();
+  const [picking, setPicking] = useState(false);
+  const [activeSlot, setActiveSlot] = useState(0);
+
+  const allSelected: Card[] = hand.filter(Boolean) as Card[];
+
+  function isBlocked(card: Card): boolean {
+    return allSelected.some(
+      (c, si) => si !== activeSlot && c.rank === card.rank && c.suit === card.suit,
+    );
+  }
+
+  function handleSlotClick(idx: number) {
+    setActiveSlot(idx);
+    setPicking(true);
+  }
+
+  function handleCardClick(card: Card) {
+    if (isBlocked(card)) return;
+    const current = hand[activeSlot];
+    if (current?.rank === card.rank && current?.suit === card.suit) {
+      onChange(activeSlot, null);
+      return;
+    }
+    onChange(activeSlot, card);
+    // Auto-advance to next empty slot
+    const nextEmpty = hand.findIndex((c, i) => i > activeSlot && c === null)
+      ?? hand.findIndex((c, i) => i !== activeSlot && c === null);
+    const next = hand.findIndex((c, i) => i !== activeSlot && c === null);
+    if (next !== -1) {
+      setActiveSlot(next);
+    } else {
+      setPicking(false);
+    }
+  }
+
+  function handleClearSlot(idx: number, e: React.MouseEvent) {
+    e.stopPropagation();
+    onChange(idx, null);
+  }
+
+  const activeCard = hand[activeSlot];
+
+  return (
+    <div className="space-y-3">
+      {/* Slot row */}
+      <div className="flex gap-2 flex-wrap">
+        {hand.map((card, i) => (
+          <button
+            key={i}
+            onClick={() => handleSlotClick(i)}
+            className={cn(
+              "relative h-20 w-14 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5",
+              card
+                ? "bg-white shadow-md dark:bg-zinc-800 border-transparent"
+                : "border-dashed border-muted-foreground/30 bg-muted/20 hover:border-primary/50 hover:bg-primary/5",
+              picking && activeSlot === i && "ring-2 ring-primary ring-offset-1",
+            )}
+            title={card ? "Clique para trocar" : "Clique para selecionar"}
+          >
+            {card ? (
+              <>
+                <span className={cn("text-2xl leading-none font-bold", suitColors[card.suit])}>
+                  {RANK_LABELS[card.rank]}
+                </span>
+                <span className={cn("text-xl leading-none", suitColors[card.suit])}>
+                  {SUIT_SYMBOLS[card.suit]}
+                </span>
+                <button
+                  className="absolute -top-1.5 -right-1.5 bg-background border rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground transition-colors"
+                  onClick={(e) => handleClearSlot(i, e)}
+                  title="Remover"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </>
+            ) : (
+              <span className="text-base text-muted-foreground font-normal">{i + 1}</span>
+            )}
+          </button>
+        ))}
+
+        {/* Quick-clear all */}
+        {hand.some(Boolean) && (
+          <button
+            onClick={() => { hand.forEach((_, i) => onChange(i, null)); setPicking(false); }}
+            className="self-end text-xs text-muted-foreground hover:text-foreground pb-1"
+          >
+            Limpar tudo
+          </button>
+        )}
+      </div>
+
+      {/* Inline card grid */}
+      {picking && (
+        <div className="rounded-xl border bg-card p-3 space-y-2">
+          {/* Slot tabs */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {hand.map((card, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveSlot(i)}
+                className={cn(
+                  "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                  activeSlot === i
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80",
+                )}
+              >
+                {card ? (
+                  <span className={suitColors[card.suit]}>
+                    {RANK_LABELS[card.rank]}{SUIT_SYMBOLS[card.suit]}
+                  </span>
+                ) : (
+                  `Carta ${i + 1}`
+                )}
+              </button>
+            ))}
+            <button
+              onClick={() => setPicking(false)}
+              className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+            >
+              Fechar
+            </button>
+          </div>
+
+          {/* Card grid */}
+          <div
+            className="grid gap-1 overflow-x-auto"
+            style={{ gridTemplateColumns: `repeat(${RANKS.length}, minmax(44px, 1fr))` }}
+          >
+            {DISPLAY_SUITS.map((suit) =>
+              [...RANKS].reverse().map((rank) => {
+                const card: Card = { rank, suit };
+                const blocked = isBlocked(card);
+                const isCurrent = activeCard?.rank === rank && activeCard?.suit === suit;
+                return (
+                  <button
+                    key={`${rank}-${suit}`}
+                    onClick={() => handleCardClick(card)}
+                    disabled={blocked}
+                    className={cn(
+                      "h-[56px] rounded-lg font-bold flex flex-col items-center justify-center leading-none transition-all gap-0.5 text-sm",
+                      blocked && "opacity-20 cursor-not-allowed",
+                      isCurrent && "bg-primary text-primary-foreground scale-105 shadow-md",
+                      !blocked && !isCurrent && "hover:bg-muted hover:scale-105 cursor-pointer",
+                      !isCurrent && suitColors[suit],
+                    )}
+                  >
+                    <span className="text-xs">{RANK_LABELS[rank]}</span>
+                    <span className="text-xs">{SUIT_SYMBOLS[suit]}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Probability bar ────────────────────────────────────────────────────────────
 
-function ProbBar({
-  label,
-  sublabel,
-  prob,
-  best,
-}: {
-  label: string;
-  sublabel?: string;
-  prob: number;
-  best: boolean;
-}) {
+function ProbBar({ label, prob, best }: { label: string; prob: number; best: boolean }) {
   const pct = Math.round(prob * 100);
   return (
     <div className={cn("rounded-lg px-3 py-2 flex items-center gap-3", best ? "bg-emerald-500/10 border border-emerald-500/30" : "bg-muted/50")}>
       <div className="flex-1 min-w-0">
         <div className={cn("text-sm font-medium", best && "text-emerald-700 dark:text-emerald-400")}>
           {label}
-          {sublabel && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{sublabel}</span>}
         </div>
         <div className="mt-1 h-1.5 bg-muted rounded-full overflow-hidden">
           <div
@@ -103,13 +271,13 @@ export function SolverPanel() {
   const [tables, setTables] = useState<SolverTables | null>(null);
   const [infosetCount, setInfosetCount] = useState(0);
 
-  const [hand, setHand] = useState<(Card | null)[]>(Array(5).fill(null));
+  const [hand, setHand] = useState<(Card | null)[]>(Array(HAND_SIZE).fill(null));
   const [position, setPosition] = useState<Position>(0);
   const [street, setStreet] = useState<Street>(0);
 
   const [betSeq, setBetSeq] = useState<BetAction[]>([]);
   const [betState, setBetState] = useState<BettingState>(initialBettingState(0));
-  const [showHistory, setShowHistory] = useState(false);
+  const [showSimulate, setShowSimulate] = useState(false);
 
   // ── Training ───────────────────────────────────────────────────────────────
 
@@ -135,7 +303,7 @@ export function SolverPanel() {
   // ── Derived state ──────────────────────────────────────────────────────────
 
   const selectedCards = useMemo(() => hand.filter(Boolean) as Card[], [hand]);
-  const handComplete = selectedCards.length === 5;
+  const handComplete = selectedCards.length === HAND_SIZE;
 
   const bucket = useMemo(
     () => (handComplete ? handToBucket(selectedCards) : null),
@@ -154,7 +322,6 @@ export function SolverPanel() {
     [betState, street, roundDone],
   );
 
-  // Betting strategy lookup (only for user's own position)
   const betStrategy = useMemo(() => {
     if (!tables || bucket === null || !isMyTurn || roundDone) return null;
     const key = infoSetKey({
@@ -167,10 +334,11 @@ export function SolverPanel() {
     const node = tables.bet.get(key);
     if (!node) return null;
     const probs = averageStrategy(node);
-    return node.actions.map((a, i) => ({ action: a as BetAction, prob: probs[i] }));
+    return node.actions
+      .map((a, i) => ({ action: a as BetAction, prob: probs[i] }))
+      .sort((a, b) => b.prob - a.prob);
   }, [tables, bucket, position, street, isMyTurn, betSeq, roundDone]);
 
-  // Draw strategy lookup
   const drawStrategy = useMemo(() => {
     if (!tables || bucket === null || street >= 3) return null;
     const nextStreet = (street + 1) as Street;
@@ -178,7 +346,8 @@ export function SolverPanel() {
     const node = tables.draw.get(key);
     if (!node) return null;
     const probs = averageDrawStrategy(node);
-    return Array.from({ length: 6 }, (_, dc) => ({ drawCount: dc, prob: probs[dc] }));
+    return Array.from({ length: 6 }, (_, dc) => ({ drawCount: dc, prob: probs[dc] }))
+      .sort((a, b) => b.prob - a.prob);
   }, [tables, bucket, position, street]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -210,7 +379,10 @@ export function SolverPanel() {
     setBetState(initialBettingState(street));
   }
 
-  // ── Render: training phase ─────────────────────────────────────────────────
+  const bestBetProb = betStrategy ? betStrategy[0].prob : 0;
+  const bestDrawProb = drawStrategy ? drawStrategy[0].prob : 0;
+
+  // ── Render: training ───────────────────────────────────────────────────────
 
   if (phase !== "ready") {
     return (
@@ -223,24 +395,23 @@ export function SolverPanel() {
         </div>
 
         <ol className="space-y-2 text-sm">
-          <li className="flex gap-2 text-muted-foreground">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold">1</span>
-            Clique em <strong className="text-foreground">Inicializar</strong> — o solver treina {TRAIN_ITERATIONS.toLocaleString()} iterações de CFR+ (~4s)
-          </li>
-          <li className="flex gap-2 text-muted-foreground">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-bold">2</span>
-            Insira sua mão (5 cartas) e selecione posição e rodada
-          </li>
-          <li className="flex gap-2 text-muted-foreground">
-            <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-xs font-bold">3</span>
-            Veja a recomendação GTO de aposta e de draw
-          </li>
+          {[
+            <>Clique em <strong className="text-foreground">Inicializar</strong> — treina {TRAIN_ITERATIONS.toLocaleString()} iterações de CFR+ (~4s)</>,
+            <>Insira sua mão (5 cartas) e selecione posição e rodada</>,
+            <>Veja a recomendação GTO de aposta e de draw</>,
+          ].map((text, i) => (
+            <li key={i} className="flex gap-2 text-muted-foreground">
+              <span className={cn(
+                "shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold",
+                i === 0 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
+              )}>{i + 1}</span>
+              {text}
+            </li>
+          ))}
         </ol>
 
         {phase === "idle" && (
-          <Button onClick={handleTrain}>
-            Inicializar Solver
-          </Button>
+          <Button onClick={handleTrain}>Inicializar Solver</Button>
         )}
 
         {(phase === "initializing" || phase === "training") && (
@@ -265,12 +436,8 @@ export function SolverPanel() {
 
   // ── Render: ready ──────────────────────────────────────────────────────────
 
-  const bestBetProb = betStrategy ? Math.max(...betStrategy.map((x) => x.prob)) : 0;
-  const bestDrawProb = drawStrategy ? Math.max(...drawStrategy.map((x) => x.prob)) : 0;
-
   return (
     <div className="space-y-4 max-w-xl">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <span className="font-semibold text-sm">Solver GTO — 2-7 Triple Draw FL</span>
@@ -285,27 +452,22 @@ export function SolverPanel() {
       <div className="rounded-xl border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
           <span className="w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold shrink-0">1</span>
-          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sua mão (5 cartas)</span>
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Sua mão — clique em qualquer carta para abrir o picker
+          </span>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {hand.map((card, i) => (
-            <CardPicker
-              key={i}
-              selected={card}
-              onSelect={(c) => updateHand(i, c)}
-              blockedCards={hand.filter((c, j) => j !== i && c !== null) as Card[]}
-            />
-          ))}
-        </div>
-        {bucket !== null && (
+        <HandPicker hand={hand} onChange={updateHand} />
+        {bucket !== null ? (
           <p className="text-xs text-muted-foreground">
-            Força da mão: bucket{" "}
-            <span className="font-semibold text-foreground">{bucket + 1}</span>/{NUM_BUCKETS}{" "}
-            {bucket < 5 ? "· excelente" : bucket < 10 ? "· boa" : bucket < 15 ? "· mediana" : "· fraca"}
+            Potencial de draw: bucket{" "}
+            <span className="font-semibold text-foreground">{bucket + 1}</span>/{NUM_BUCKETS}
+            {" "}·{" "}
+            {bucket < 4 ? "excelente" : bucket < 8 ? "boa" : bucket < 13 ? "mediana" : bucket < 17 ? "fraca" : "muito fraca"}
           </p>
-        )}
-        {!handComplete && (
-          <p className="text-xs text-muted-foreground italic">Insira as 5 cartas para ver as recomendações.</p>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            Selecione as 5 cartas para ver a recomendação GTO.
+          </p>
         )}
       </div>
 
@@ -323,8 +485,8 @@ export function SolverPanel() {
               value={position}
               onChange={(e) => handlePositionChange(+e.target.value as Position)}
             >
-              <option value={0}>SB / Botão (age 1º no pré-draw)</option>
-              <option value={1}>BB (age 1º pós-draw)</option>
+              <option value={0}>SB / Botão</option>
+              <option value={1}>BB</option>
             </select>
           </div>
           <div className="space-y-1">
@@ -351,30 +513,35 @@ export function SolverPanel() {
           </div>
           {betSeq.length > 0 && (
             <button onClick={resetBetting} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              <RotateCcw className="h-3 w-3" />Reset
+              <RotateCcw className="h-3 w-3" /> Reset
             </button>
           )}
         </div>
 
-        {/* My turn — show recommendation */}
+        {/* Sequence trail */}
+        {betSeq.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {betSeq.map((a, i) => {
+              const actor = ((firstToAct(street) + i) % 2) as Position;
+              const isMe = actor === position;
+              return (
+                <span key={i} className={cn("text-xs px-1.5 py-0.5 rounded", isMe ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
+                  {isMe ? "Você" : "Oponente"}: {ACTION_SHORT[a]}
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/* My turn */}
         {isMyTurn && !roundDone && (
           <>
             {handComplete ? (
               betStrategy ? (
                 <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground mb-2">
-                    GTO recomenda (bucket {bucket! + 1}/{NUM_BUCKETS}):
-                  </p>
-                  {betStrategy
-                    .sort((a, b) => b.prob - a.prob)
-                    .map(({ action, prob }) => (
-                      <ProbBar
-                        key={action}
-                        label={ACTION_PT[action]}
-                        prob={prob}
-                        best={prob === bestBetProb}
-                      />
-                    ))}
+                  {betStrategy.map(({ action, prob }) => (
+                    <ProbBar key={action} label={ACTION_PT[action]} prob={prob} best={prob === bestBetProb} />
+                  ))}
                 </div>
               ) : (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -382,20 +549,19 @@ export function SolverPanel() {
                 </p>
               )
             ) : (
-              <p className="text-xs text-muted-foreground italic">Insira sua mão (passo 1) para ver a recomendação.</p>
+              <p className="text-xs text-muted-foreground italic">Insira a mão (passo 1) para ver a recomendação.</p>
             )}
 
-            {/* Simulate advancing — collapse by default */}
+            {/* Simulate collapse */}
             <button
-              onClick={() => setShowHistory(!showHistory)}
+              onClick={() => setShowSimulate(!showSimulate)}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1"
             >
-              {showHistory ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-              Simular sequência de apostas
+              {showSimulate ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+              Simular próximas ações
             </button>
-
-            {showHistory && (
-              <div className="flex gap-2 flex-wrap pt-1 border-t mt-1">
+            {showSimulate && (
+              <div className="flex gap-2 flex-wrap border-t pt-2">
                 {currentActions.map((action) => (
                   <Button key={action} size="sm" className="text-xs h-7" onClick={() => pushAction(action)}>
                     Jogar: {ACTION_SHORT[action]}
@@ -406,57 +572,21 @@ export function SolverPanel() {
           </>
         )}
 
-        {/* Opponent's turn — let user specify what opponent did */}
+        {/* Opponent's turn */}
         {!isMyTurn && !roundDone && (
           <div className="space-y-2">
-            <p className="text-sm font-medium">
-              {position === 0
-                ? "BB age primeiro nesta rodada. O que ele fez?"
-                : "SB age primeiro no pré-draw. O que ele fez?"}
+            <p className="text-sm font-medium text-muted-foreground">
+              {position === 1
+                ? "SB age primeiro no pré-draw. O que ele fez?"
+                : "BB age primeiro nas rodadas pós-draw. O que ele fez?"}
             </p>
             <div className="flex gap-2 flex-wrap">
               {currentActions.map((action) => (
-                <Button
-                  key={action}
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-8"
-                  onClick={() => pushAction(action)}
-                >
+                <Button key={action} variant="outline" size="sm" className="text-xs h-8" onClick={() => pushAction(action)}>
                   Oponente: {ACTION_SHORT[action]}
                 </Button>
               ))}
             </div>
-
-            {/* History trail */}
-            {betSeq.length > 0 && (
-              <div className="flex flex-wrap gap-1 text-xs pt-1">
-                {betSeq.map((a, i) => {
-                  const actor = ((firstToAct(street) + i) % 2) as Position;
-                  const isMe = actor === position;
-                  return (
-                    <span key={i} className={cn("px-1.5 py-0.5 rounded", isMe ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
-                      {isMe ? "Você" : "Oponente"}: {ACTION_SHORT[a]}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Sequence history trail when it IS my turn but actions already happened */}
-        {isMyTurn && !roundDone && betSeq.length > 0 && (
-          <div className="flex flex-wrap gap-1 text-xs border-t pt-2">
-            {betSeq.map((a, i) => {
-              const actor = ((firstToAct(street) + i) % 2) as Position;
-              const isMe = actor === position;
-              return (
-                <span key={i} className={cn("px-1.5 py-0.5 rounded", isMe ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
-                  {isMe ? "Você" : "Oponente"}: {ACTION_SHORT[a]}
-                </span>
-              );
-            })}
           </div>
         )}
 
@@ -464,7 +594,7 @@ export function SolverPanel() {
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">Rodada de apostas concluída.</p>
             <button onClick={resetBetting} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              <RotateCcw className="h-3 w-3" />Nova rodada
+              <RotateCcw className="h-3 w-3" /> Nova rodada
             </button>
           </div>
         )}
@@ -479,21 +609,13 @@ export function SolverPanel() {
               · draw {street + 1} (após esta rodada de apostas)
             </span>
           </div>
-
           {!handComplete ? (
-            <p className="text-xs text-muted-foreground italic">Insira sua mão para ver.</p>
+            <p className="text-xs text-muted-foreground italic">Insira a mão para ver.</p>
           ) : drawStrategy ? (
             <div className="space-y-1.5">
-              {drawStrategy
-                .sort((a, b) => b.prob - a.prob)
-                .map(({ drawCount, prob }) => (
-                  <ProbBar
-                    key={drawCount}
-                    label={DRAW_PT[drawCount]}
-                    prob={prob}
-                    best={prob === bestDrawProb}
-                  />
-                ))}
+              {drawStrategy.map(({ drawCount, prob }) => (
+                <ProbBar key={drawCount} label={DRAW_PT[drawCount]} prob={prob} best={prob === bestDrawProb} />
+              ))}
             </div>
           ) : (
             <p className="text-xs text-amber-600 dark:text-amber-400">

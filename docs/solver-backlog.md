@@ -77,10 +77,10 @@ cfr(state, reach_p0, reach_p1):
 
 > O algoritmo em si é ~100 linhas. CFR+ atualiza regrets com `max(r, 0)` em vez de acumular negativos — converge mais rápido.
 
-### Etapa 5 — Trainer e export ⬜
+### Etapa 5 — Trainer e export ✅
 Script offline que itera CFR+ até exploitabilidade < 0,5% do pot, depois exporta strategy tables como JSON comprimido para consumo no web app.
 
-### Etapa 6 — Integração no web app ⬜
+### Etapa 6 — Integração no web app ✅
 Lookup estático: dado (hand bucket, street, pot odds, histórico de bet) → retornar distribuição de ações GTO recomendada.
 
 ---
@@ -120,5 +120,5 @@ Com 50 buckets: ~180KB — ainda trivial. CFR converge em minutos no Node.js.
 - [x] Etapa 2 — Abstração de mãos (2026-04-29)
 - [x] Etapa 3 — Transições de bucket (2026-04-29)
 - [x] Etapa 4 — CFR+ external sampling MCCFR (2026-04-29)
-- [ ] Etapa 5 — Trainer script + export JSON
-- [ ] Etapa 6 — Integração web app
+- [x] Etapa 5 — Trainer script + export JSON (2026-04-30)
+- [x] Etapa 6 — Integração web app — SolverPanel GTO interativo (2026-04-30)

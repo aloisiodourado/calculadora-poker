@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { useDeckColor } from "@/contexts/DeckColorContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
+import { SolverPanel } from "@/components/SolverPanel";
 
 const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
 const MAX_PLAYERS = 6;
@@ -86,6 +87,7 @@ export default function Home() {
   const config = useMemo(() => getVariantConfig(variant), [variant]);
   const isHiLo = config.evaluators.length === 2;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
+  const isSolver = variant === PokerVariant.Solver27TD;
   const is27Low = isTripleDraw || variant === PokerVariant.SingleDraw27;
   const { scheme, toggle } = useDeckColor();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -444,7 +446,9 @@ export default function Home() {
 
         <Separator />
 
-        {config.communityCards > 0 && (
+        {isSolver && <SolverPanel />}
+
+        {!isSolver && config.communityCards > 0 && (
           <BoardInput
             cards={board}
             communityCardCount={config.communityCards}
@@ -455,7 +459,7 @@ export default function Home() {
         )}
 
         {/* Sidebar (calculate + pot odds) alongside player hands */}
-        <div className="flex gap-4 items-start">
+        {!isSolver && <div className="flex gap-4 items-start">
 
           {/* Left sidebar */}
           <div className="shrink-0 w-64 space-y-3">
@@ -555,7 +559,7 @@ export default function Home() {
               </Button>
             )}
           </div>
-        </div>
+        </div>}
         </div>
 
         {is27Low && (

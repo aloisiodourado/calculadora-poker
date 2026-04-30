@@ -8,6 +8,7 @@ export enum PokerVariant {
   SingleDraw27 = "2-7-single-draw",
   TripleDraw27 = "2-7-triple-draw",
   Badugi = "badugi",
+  Solver27TD = "2-7-triple-draw-solver",
 }
 
 export type EvaluatorType = "high" | "a5low" | "27low" | "badugi";

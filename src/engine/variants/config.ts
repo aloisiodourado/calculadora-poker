@@ -82,6 +82,15 @@ export const VARIANT_CONFIGS: Record<PokerVariant, VariantConfig> = {
     omahaRules: false,
     studGame: false,
   },
+  [PokerVariant.Solver27TD]: {
+    name: "2-7 TD Solver (GTO)",
+    holeCards: 5,
+    communityCards: 0,
+    totalCards: 5,
+    evaluators: ["27low"],
+    omahaRules: false,
+    studGame: false,
+  },
 };
 
 export function getVariantConfig(variant: PokerVariant): VariantConfig {

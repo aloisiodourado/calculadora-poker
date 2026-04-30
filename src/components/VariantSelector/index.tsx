@@ -32,6 +32,10 @@ const VARIANT_GROUPS = [
     label: "Other",
     variants: [PokerVariant.Badugi],
   },
+  {
+    label: "Solver",
+    variants: [PokerVariant.Solver27TD],
+  },
 ];
 
 export function VariantSelector({ value, onChange }: VariantSelectorProps) {

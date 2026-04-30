@@ -54,7 +54,7 @@ function loadResume(filePath: string, tables: SolverTables): void {
   // but strategySum is re-seeded so the average is warm-started)
   for (const [key, { actions, probs }] of data.bet) {
     tables.bet.set(key, {
-      actions,
+      actions: actions as import("../game/types").BetAction[],
       regretSum: new Array(actions.length).fill(0),
       strategySum: probs.map((p) => p * data.iterations),
     });
@@ -63,6 +63,8 @@ function loadResume(filePath: string, tables: SolverTables): void {
   // Rebuild draw table
   for (const [key, probs] of data.draw) {
     tables.draw.set(key, {
+      probabilities: probs.map((p) => p * data.iterations),
+      regretSum: new Array(probs.length).fill(0),
       strategySum: probs.map((p) => p * data.iterations),
     });
   }

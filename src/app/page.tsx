@@ -8,6 +8,7 @@ import { SimulationResult, DrawRoundStrategy } from "@/engine/simulator/types";
 import { DEFAULT_DRAW_THRESHOLDS, applyDrawStrategy } from "@/engine/simulator/drawStrategy";
 import { findTop10Rank, TOP_10_27 } from "@/lib/top10-27";
 import { HandCategory, buildStrategyAwareRepHand } from "@/lib/representative-hands-27td";
+import { RangeEntry, buildRangeHandState } from "@/lib/range-hand-builder";
 import { VariantSelector } from "@/components/VariantSelector";
 import { PotOddsPanel } from "@/components/PotOddsPanel";
 import { Top10Panel } from "@/components/Top10Panel";
@@ -70,6 +71,7 @@ export default function Home() {
   ]);
 
   const [handCategories, setHandCategories] = useState<(HandCategory | null)[]>([null, null]);
+  const [playerRanges, setPlayerRanges] = useState<(RangeEntry[] | null)[]>([null, null]);
   const [activePlayerIdx, setActivePlayerIdx] = useState<number | null>(null);
 
   // Pot odds
@@ -124,6 +126,7 @@ export default function Home() {
     setDrawRoundsLeft(3);
     setPlayerExplicitDiscards((prev) => prev.map(() => emptyExplicitDiscards()));
     setHandCategories((prev) => prev.map(() => null));
+    setPlayerRanges((prev) => prev.map(() => null));
     setActivePlayerIdx(null);
     setResult(null);
     setError(null);
@@ -145,6 +148,15 @@ export default function Home() {
       setHands((prev) => { const next = [...prev]; next[playerIdx] = emptyHand(config.holeCards); return next; });
       setPlayerExplicitDiscards((prev) => { const next = [...prev]; next[playerIdx] = emptyExplicitDiscards(); return next; });
     }
+    setResult(null);
+  }
+
+  function handleRangeChange(playerIdx: number, range: RangeEntry[] | null) {
+    setPlayerRanges((prev) => {
+      const next = [...prev];
+      next[playerIdx] = range;
+      return next;
+    });
     setResult(null);
   }
 
@@ -256,6 +268,7 @@ export default function Home() {
     setPlayerDrawStrategies((prev) => [...prev, defaultStrategies()]);
     setPlayerExplicitDiscards((prev) => [...prev, emptyExplicitDiscards()]);
     setHandCategories((prev) => [...prev, null]);
+    setPlayerRanges((prev) => [...prev, null]);
     setResult(null);
   }
 
@@ -266,6 +279,7 @@ export default function Home() {
     setPlayerDrawStrategies((prev) => prev.filter((_, i) => i !== idx));
     setPlayerExplicitDiscards((prev) => prev.filter((_, i) => i !== idx));
     setHandCategories((prev) => prev.filter((_, i) => i !== idx));
+    setPlayerRanges((prev) => prev.filter((_, i) => i !== idx));
     if (activePlayerIdx === idx) setActivePlayerIdx(null);
     setResult(null);
   }
@@ -275,33 +289,100 @@ export default function Home() {
     setError(null);
     setResult(null);
 
-    const handData = hands.map((h, hi) =>
-      h.filter((c, ci): c is Card => c !== null && !discards[hi][ci])
-    );
     const boardData = board.filter((c): c is Card => c !== null);
+    const hasAnyRange = playerRanges.some((r) => r && r.length > 0);
 
     try {
-      const body: Record<string, unknown> = {
-        variant,
-        hands: handData,
-        board: boardData,
-        iterations,
-      };
+      if (!hasAnyRange) {
+        const handData = hands.map((h, hi) =>
+          h.filter((c, ci): c is Card => c !== null && !discards[hi][ci])
+        );
+        const body: Record<string, unknown> = {
+          variant,
+          hands: handData,
+          board: boardData,
+          iterations,
+        };
+        if (isTripleDraw) {
+          body.drawRoundsLeft = drawRoundsLeft;
+          body.playerDrawStrategies = playerDrawStrategies;
+          body.playerExplicitDiscards = playerExplicitDiscards;
+        }
+        const res = await fetch("/api/equity", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? "Unknown error");
+        setResult(data);
+      } else {
+        // Build per-player options: range players get one option per entry, others get one fixed option
+        const perPlayerOptions = hands.map((hand, i) => {
+          const range = playerRanges[i];
+          if (range && range.length > 0) {
+            return range.map((entry) => {
+              const { cards, explicitDiscards } = buildRangeHandState(entry, i);
+              return {
+                cards: cards.filter((c): c is Card => c !== null),
+                explicitDiscards,
+              };
+            });
+          }
+          return [{
+            cards: hand.filter((c, ci): c is Card => c !== null && !discards[i][ci]),
+            explicitDiscards: playerExplicitDiscards[i],
+          }];
+        });
 
-      if (isTripleDraw) {
-        body.drawRoundsLeft = drawRoundsLeft;
-        body.playerDrawStrategies = playerDrawStrategies;
-        body.playerExplicitDiscards = playerExplicitDiscards;
+        // Cartesian product of all player options
+        const combinations = perPlayerOptions.reduce<Array<Array<{ cards: Card[]; explicitDiscards: boolean[] }>>>(
+          (acc, opts) => acc.flatMap((combo) => opts.map((opt) => [...combo, opt])),
+          [[]]
+        );
+
+        const simResults = await Promise.all(
+          combinations.map(async (combo) => {
+            const body: Record<string, unknown> = {
+              variant,
+              hands: combo.map((p) => p.cards),
+              board: boardData,
+              iterations,
+            };
+            if (isTripleDraw) {
+              body.drawRoundsLeft = drawRoundsLeft;
+              body.playerDrawStrategies = playerDrawStrategies;
+              body.playerExplicitDiscards = combo.map((p) => p.explicitDiscards);
+            }
+            const res = await fetch("/api/equity", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error ?? "Unknown error");
+            return data as SimulationResult;
+          })
+        );
+
+        const n = combinations.length;
+        const avgResults = hands.map((hand, i) => ({
+          hand: hand.filter((c): c is Card => c !== null),
+          equity: simResults.reduce((sum, r) => sum + r.results[i].equity, 0) / n,
+          wins: simResults.reduce((sum, r) => sum + r.results[i].wins, 0) / n,
+          ties: simResults.reduce((sum, r) => sum + r.results[i].ties, 0) / n,
+          losses: simResults.reduce((sum, r) => sum + r.results[i].losses, 0) / n,
+          hiWins: simResults.reduce((sum, r) => sum + r.results[i].hiWins, 0) / n,
+          loWins: simResults.reduce((sum, r) => sum + r.results[i].loWins, 0) / n,
+          loQualified: simResults.reduce((sum, r) => sum + r.results[i].loQualified, 0) / n,
+        }));
+
+        setResult({
+          results: avgResults,
+          iterationsRun: iterations,
+          durationMs: simResults.reduce((sum, r) => sum + r.durationMs, 0),
+        });
       }
-
-      const res = await fetch("/api/equity", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Unknown error");
-      setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Simulation failed");
     } finally {
@@ -419,7 +500,6 @@ export default function Home() {
                 onPotChange={setPot}
                 onBetChange={setBet}
                 requiredEquity={requiredEquity}
-                playerEquities={result?.results.map((r) => r.equity)}
               />
             )}
           </div>
@@ -459,6 +539,8 @@ export default function Home() {
                   }
                   onExplicitDiscardToggle={(slotIdx) => handleExplicitDiscardToggle(i, slotIdx)}
                   onCategoryChange={isTripleDraw ? (cat) => handleCategoryChange(i, cat) : undefined}
+                  playerRange={isTripleDraw ? playerRanges[i] : undefined}
+                  onRangeChange={isTripleDraw ? (range) => handleRangeChange(i, range) : undefined}
                   onSetActive={() => setActivePlayerIdx(activePlayerIdx === i ? null : i)}
                   onRemove={() => removePlayer(i)}
                   canRemove={hands.length > 2}

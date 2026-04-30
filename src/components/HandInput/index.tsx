@@ -21,9 +21,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { X, Target } from "lucide-react";
+import { X, Target, Plus, LayoutList } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HandCategory, HAND_CATEGORIES, CATEGORY_SHORT, CATEGORY_LABELS, CATEGORY_RANGE_PCT } from "@/lib/representative-hands-27td";
+import { HandCategory, HAND_CATEGORIES, CATEGORY_SHORT, CATEGORY_LABELS, CATEGORY_RANGE_PCT, CATEGORY_KEEP_COUNT } from "@/lib/representative-hands-27td";
+import { RangeEntry, DEFAULT_RANGE_ENTRY, RANGE_RANK_OPTIONS, rangeEntryLabel } from "@/lib/range-hand-builder";
 import { useDeckColor } from "@/contexts/DeckColorContext";
 
 export const PLAYER_COLORS = [
@@ -107,6 +108,8 @@ interface HandInputProps {
   onSetActive?: () => void;
   onRemove: () => void;
   canRemove: boolean;
+  playerRange?: RangeEntry[] | null;
+  onRangeChange?: (range: RangeEntry[] | null) => void;
 }
 
 export function HandInput({
@@ -134,6 +137,8 @@ export function HandInput({
   onSetActive,
   onRemove,
   canRemove,
+  playerRange,
+  onRangeChange,
 }: HandInputProps) {
   const colorIdx = handIndex % PLAYER_COLORS.length;
   const isStud = STUD_VARIANTS.includes(variant);
@@ -143,6 +148,7 @@ export function HandInput({
   const isSingleDraw27 = variant === PokerVariant.SingleDraw27;
   const showEmptyDiscardCheckboxes = isTripleDraw || isSingleDraw27;
   const inCategoryMode = isTripleDraw && !!handCategory;
+  const inRangeMode = isTripleDraw && !!onRangeChange && playerRange != null;
 
   const currentRoundIdx = isTripleDraw && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
   const currentDrawStrategy =
@@ -190,6 +196,17 @@ export function HandInput({
           />
         </div>
         <div className="flex items-center gap-1">
+          {isTripleDraw && onRangeChange && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-6 w-6", inRangeMode ? "text-violet-500" : "text-muted-foreground")}
+              onClick={() => onRangeChange(playerRange != null ? null : [{ ...DEFAULT_RANGE_ENTRY }])}
+              title={inRangeMode ? "Voltar para mão única" : "Definir range de mãos"}
+            >
+              <LayoutList className="h-3 w-3" />
+            </Button>
+          )}
           {onSetActive && (
             <Button
               variant="ghost"
@@ -214,11 +231,20 @@ export function HandInput({
         </div>
       </div>
 
-      {/* WIP category selector */}
-      {isTripleDraw && onCategoryChange && (
+      {/* Category selector — hidden in range mode */}
+      {isTripleDraw && onCategoryChange && !inRangeMode && (
         <CategorySelector
           selected={handCategory ?? null}
           onChange={onCategoryChange}
+        />
+      )}
+
+      {/* Range builder */}
+      {inRangeMode && playerRange != null && onRangeChange && (
+        <RangeBuilder
+          range={playerRange}
+          playerIdx={handIndex}
+          onChange={onRangeChange}
         />
       )}
 
@@ -232,8 +258,8 @@ export function HandInput({
         />
       )}
 
-      {/* Draw layout — batch picker on every slot */}
-      {isDraw && (
+      {/* Draw layout — hidden in range mode */}
+      {isDraw && !inRangeMode && (
         <DrawLayout
           cards={cards}
           discards={discards}
@@ -749,6 +775,138 @@ function TripleDrawStrategy({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Range builder ──────────────────────────────────────────────────────────────
+
+function RangeBuilder({
+  range,
+  playerIdx,
+  onChange,
+}: {
+  range: RangeEntry[];
+  playerIdx: number;
+  onChange: (range: RangeEntry[] | null) => void;
+}) {
+  function addEntry() {
+    onChange([...range, { ...DEFAULT_RANGE_ENTRY }]);
+  }
+
+  function updateEntry(i: number, entry: RangeEntry) {
+    const next = [...range];
+    next[i] = entry;
+    onChange(next);
+  }
+
+  function removeEntry(i: number) {
+    onChange(range.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+        Range de mãos
+      </p>
+      {range.map((entry, i) => (
+        <RangeEntryRow
+          key={i}
+          entry={entry}
+          onChange={(e) => updateEntry(i, e)}
+          onRemove={() => removeEntry(i)}
+          canRemove={range.length > 1}
+        />
+      ))}
+      {range.length === 0 && (
+        <p className="text-xs text-muted-foreground italic">Nenhuma categoria adicionada.</p>
+      )}
+      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addEntry}>
+        <Plus className="h-3 w-3 mr-1" />
+        Adicionar categoria
+      </Button>
+    </div>
+  );
+}
+
+function RangeEntryRow({
+  entry,
+  onChange,
+  onRemove,
+  canRemove,
+}: {
+  entry: RangeEntry;
+  onChange: (entry: RangeEntry) => void;
+  onRemove: () => void;
+  canRemove: boolean;
+}) {
+  const keepCount = CATEGORY_KEEP_COUNT[entry.category];
+  const label = rangeEntryLabel(entry);
+
+  function handleCategoryChange(cat: HandCategory) {
+    onChange({ ...entry, category: cat });
+  }
+
+  function handleRank1Change(rank: number) {
+    const newRank2 = entry.rank2 >= rank ? Math.max(2, rank - 1) : entry.rank2;
+    onChange({ ...entry, rank1: rank, rank2: newRank2 });
+  }
+
+  function handleRank2Change(rank: number) {
+    onChange({ ...entry, rank2: rank });
+  }
+
+  const rank2Options = RANGE_RANK_OPTIONS.filter((r) => r < entry.rank1);
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap text-xs">
+      <select
+        value={entry.category}
+        onChange={(e) => handleCategoryChange(e.target.value as HandCategory)}
+        className="border rounded px-1.5 py-1 bg-background text-xs font-medium cursor-pointer focus:outline-none"
+      >
+        {HAND_CATEGORIES.map((cat) => (
+          <option key={cat} value={cat}>{CATEGORY_SHORT[cat]}</option>
+        ))}
+      </select>
+
+      {keepCount >= 1 && (
+        <>
+          <span className="text-muted-foreground">top:</span>
+          <select
+            value={entry.rank1}
+            onChange={(e) => handleRank1Change(Number(e.target.value))}
+            className="border rounded px-1.5 py-1 bg-background text-xs font-medium cursor-pointer focus:outline-none"
+          >
+            {RANGE_RANK_OPTIONS.map((r) => (
+              <option key={r} value={r}>{RANK_LABELS[r as Rank]}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      {keepCount >= 2 && rank2Options.length > 0 && (
+        <>
+          <span className="text-muted-foreground">2ª:</span>
+          <select
+            value={rank2Options.includes(entry.rank2) ? entry.rank2 : rank2Options[0]}
+            onChange={(e) => handleRank2Change(Number(e.target.value))}
+            className="border rounded px-1.5 py-1 bg-background text-xs font-medium cursor-pointer focus:outline-none"
+          >
+            {rank2Options.map((r) => (
+              <option key={r} value={r}>{RANK_LABELS[r as Rank]}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      <span className="font-mono font-bold text-foreground">{label}</span>
+
+      {canRemove && (
+        <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground" onClick={onRemove}>
+          <X className="h-3 w-3" />
+        </Button>
+      )}
     </div>
   );
 }

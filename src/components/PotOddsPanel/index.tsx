@@ -1,7 +1,6 @@
 "use client";
 
 import { TrendingUp } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface PotOddsPanelProps {
   pot: number;
@@ -9,17 +8,7 @@ interface PotOddsPanelProps {
   onPotChange: (v: number) => void;
   onBetChange: (v: number) => void;
   requiredEquity: number;
-  playerEquities?: number[];
 }
-
-const PLAYER_COLORS = [
-  "text-blue-600 dark:text-blue-400",
-  "text-emerald-600 dark:text-emerald-400",
-  "text-violet-600 dark:text-violet-400",
-  "text-amber-600 dark:text-amber-400",
-  "text-rose-600 dark:text-rose-400",
-  "text-cyan-600 dark:text-cyan-400",
-];
 
 function pct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
@@ -31,9 +20,7 @@ export function PotOddsPanel({
   onPotChange,
   onBetChange,
   requiredEquity,
-  playerEquities,
 }: PotOddsPanelProps) {
-  const hasEquities = playerEquities && playerEquities.length > 0;
 
   return (
     <div className="rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 p-4 space-y-4">
@@ -89,42 +76,6 @@ export function PotOddsPanel({
         )}
       </div>
 
-      {/* Per-player call analysis */}
-      {hasEquities && requiredEquity > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-            Análise por jogador
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {playerEquities!.map((eq, i) => {
-              const ok = eq >= requiredEquity;
-              const diff = eq - requiredEquity;
-              return (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium",
-                    ok
-                      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800"
-                      : "bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800"
-                  )}
-                >
-                  <span className={PLAYER_COLORS[i % PLAYER_COLORS.length]}>
-                    Player {i + 1}
-                  </span>
-                  <span className="font-bold tabular-nums">{pct(eq)}</span>
-                  <span className={ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
-                    {ok ? "✓ Call" : "✗ Fold"}
-                  </span>
-                  <span className="text-muted-foreground tabular-nums">
-                    ({diff >= 0 ? "+" : ""}{pct(diff)})
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

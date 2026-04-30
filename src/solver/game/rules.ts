@@ -1,5 +1,7 @@
 import { BetAction, BettingState, DrawCount, GameState, Position, Street } from "./types";
 
+export type { BettingState };
+
 // ── Fixed-Limit bet sizing ─────────────────────────────────────────────────────
 // Small bet on streets 0 and 1; big bet on streets 2 and 3.
 // All amounts in "small bet" units (big bet = 2).

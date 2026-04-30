@@ -1,3 +1,4 @@
+/// <reference types="vitest/globals" />
 import { Rank, Suit } from "@/engine/cards";
 import { handToBucket, initBuckets, NUM_BUCKETS } from "../handBuckets";
 

@@ -40,12 +40,12 @@ src/solver/
 
 ## Etapas de implementação
 
-### Etapa 1 — Tipos e regras do jogo ⬜
+### Etapa 1 — Tipos e regras do jogo ✅
 Definir `GameState` (street, pot, posição, histórico de bets, cards drawn pelo oponente), ações válidas por estado, condições terminais.
 
 > **Desbloqueador**: sem os tipos e regras corretos, nenhuma etapa seguinte funciona.
 
-### Etapa 2 — Abstração de mãos ⬜
+### Etapa 2 — Abstração de mãos ✅
 Mapear cada mão de 5 cartas para um bucket. Estratégia:
 
 - **Pre-draw:** bucket baseado em quantas cartas boas (≤8, sem par, sem straight/flush) e potencial de draw
@@ -54,14 +54,14 @@ Mapear cada mão de 5 cartas para um bucket. Estratégia:
 
 > **Ponto mais crítico**: a qualidade da abstração impacta diretamente a qualidade da solução.
 
-### Etapa 3 — Transições de bucket ⬜
+### Etapa 3 — Transições de bucket ✅
 Pré-computar via Monte Carlo: dado bucket B e K cartas descartadas, qual a distribuição de buckets possíveis na próxima street?
 
 ```
 bucketTransitions[bucket][drawCount] → { bucket: probabilidade }[]
 ```
 
-### Etapa 4 — CFR+ ⬜
+### Etapa 4 — CFR+ ✅
 ```
 cfr(state, reach_p0, reach_p1):
   if terminal → return payoff
@@ -116,4 +116,9 @@ Com 50 buckets: ~180KB — ainda trivial. CFR converge em minutos no Node.js.
 ## Status
 
 - [x] Planejamento inicial (2026-04-30)
-- [ ] Etapa 1 iniciada
+- [x] Etapa 1 — Tipos e regras (2026-04-29)
+- [x] Etapa 2 — Abstração de mãos (2026-04-29)
+- [x] Etapa 3 — Transições de bucket (2026-04-29)
+- [x] Etapa 4 — CFR+ external sampling MCCFR (2026-04-29)
+- [ ] Etapa 5 — Trainer script + export JSON
+- [ ] Etapa 6 — Integração web app

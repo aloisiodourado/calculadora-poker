@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "solver:train": "npx tsx src/solver/scripts/train.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

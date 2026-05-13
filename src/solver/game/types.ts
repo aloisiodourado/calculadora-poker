@@ -5,6 +5,12 @@ import { Card } from "@/engine/cards";
 
 export type Street = 0 | 1 | 2 | 3;
 
+// ── 6-max positions ────────────────────────────────────────────────────────────
+// Opening position of a player at a 6-max table.
+// Used as a range signal: UTG opens ~15% (tight), BTN opens ~45% (wide).
+
+export type Position6Max = "UTG" | "HJ" | "CO" | "BTN" | "SB" | "BB";
+
 // ── Positions ──────────────────────────────────────────────────────────────────
 // Heads-up FL convention: position 0 = Button/SB (acts first pre-draw, second post-draw)
 //                         position 1 = BB       (acts second pre-draw, first post-draw)
@@ -17,6 +23,9 @@ export type BetAction = "fold" | "check" | "call" | "bet" | "raise";
 
 // Number of cards discarded (0 = stand pat)
 export type DrawCount = 0 | 1 | 2 | 3 | 4 | 5;
+
+// Count of rank-2/3 cards in hand, binned: 0 = 0-1, 1 = 2-3, 2 = 4-5
+export type BlockerBin = 0 | 1 | 2;
 
 // ── Betting state within a street ─────────────────────────────────────────────
 
@@ -61,12 +70,30 @@ export interface InfoSet {
   street: Street;
   position: Position;
   myBucket: number;
+  myBlockerBin: BlockerBin;
 
   // Opponent draw counts in each prior draw round (public info)
   opponentDrawHistory: DrawCount[];
 
   // Sequence of bet actions in the current street up to this point
   bettingSequence: BetAction[];
+
+  // 6-max opening position of the villain — encodes their preflop range.
+  // UTG = tight (~15%), BTN = wide (~45%), etc.
+  villainPosition: Position6Max;
+
+  // Preflop scenario that led to this HU game — conditions both players' ranges.
+  // "SR" = single raise, "3B" = 3-bet pot, "LP" = limp pot.
+  preflopScenario: string;
+}
+
+// Opponent draw count → 3-bin abstraction to limit key explosion.
+// 0 = pat, 1 = drew 1-2, 2 = drew 3-5.
+// Reduces combinations from 6^N to 3^N (e.g. street 3: 216 → 27).
+export function drawBin(d: DrawCount): 0 | 1 | 2 {
+  if (d === 0) return 0;
+  if (d <= 2) return 1;
+  return 2;
 }
 
 // Canonical string key for a Map lookup
@@ -75,8 +102,11 @@ export function infoSetKey(is: InfoSet): string {
     is.street,
     is.position,
     is.myBucket,
-    is.opponentDrawHistory.join(","),
+    is.myBlockerBin,
+    is.opponentDrawHistory.map(drawBin).join(","),
     is.bettingSequence.join("-") || ".",
+    is.villainPosition,
+    is.preflopScenario,
   ].join("|");
 }
 
@@ -103,8 +133,17 @@ export interface DrawStrategyNode {
 
 export type DrawStrategyTable = Map<string, DrawStrategyNode>;
 
-export function drawInfoSetKey(street: Street, position: Position, myBucket: number): string {
-  return `draw|${street}|${position}|${myBucket}`;
+export function drawInfoSetKey(
+  street: Street,
+  position: Position,
+  myBucket: number,
+  myBlockerBin: BlockerBin,
+  opponentDrawHistory: DrawCount[],
+  bettingSeq: BetAction[],
+  villainPosition: Position6Max,
+  preflopScenario: string,
+): string {
+  return `draw|${street}|${position}|${myBucket}|${myBlockerBin}|${opponentDrawHistory.map(drawBin).join(",") || "."}|${bettingSeq.join("-") || "."}|${villainPosition}|${preflopScenario}`;
 }
 
 // ── Solver result ──────────────────────────────────────────────────────────────

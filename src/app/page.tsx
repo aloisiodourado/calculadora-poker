@@ -23,7 +23,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 import { SolverPanel } from "@/components/SolverPanel";
 
-const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
+const DEFAULT_VARIANT = PokerVariant.Solver27TD;
 const MAX_PLAYERS = 6;
 const TRIPLE_DRAW_SLOTS = 5;
 

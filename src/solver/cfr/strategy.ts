@@ -16,12 +16,12 @@ export function currentStrategy(node: StrategyNode): number[] {
   return node.actions.map(() => 1 / node.actions.length); // uniform fallback
 }
 
-// Current draw strategy (6 options: draw 0–5 cards).
+// Current draw strategy (uniform fallback over however many actions the node has).
 export function currentDrawStrategy(node: DrawStrategyNode): number[] {
   const pos = node.regretSum.map((r) => Math.max(0, r));
   const sum = pos.reduce((a, b) => a + b, 0);
   if (sum > 0) return pos.map((r) => r / sum);
-  return new Array(6).fill(1 / 6);
+  return new Array(node.regretSum.length).fill(1 / node.regretSum.length);
 }
 
 // Average strategy — converges to Nash equilibrium.
@@ -34,7 +34,7 @@ export function averageStrategy(node: StrategyNode): number[] {
 export function averageDrawStrategy(node: DrawStrategyNode): number[] {
   const sum = node.strategySum.reduce((a, b) => a + b, 0);
   if (sum > 0) return node.strategySum.map((s) => s / sum);
-  return new Array(6).fill(1 / 6);
+  return new Array(node.strategySum.length).fill(1 / node.strategySum.length);
 }
 
 // ── Node accessors ─────────────────────────────────────────────────────────────
@@ -59,13 +59,14 @@ export function getOrCreateBetNode(
 export function getOrCreateDrawNode(
   table: DrawStrategyTable,
   key: string,
+  numActions = 2,
 ): DrawStrategyNode {
   let node = table.get(key);
   if (!node) {
     node = {
-      probabilities: new Array(6).fill(1 / 6),
-      regretSum: new Array(6).fill(0),
-      strategySum: new Array(6).fill(0),
+      probabilities: new Array(numActions).fill(1 / numActions),
+      regretSum: new Array(numActions).fill(0),
+      strategySum: new Array(numActions).fill(0),
     };
     table.set(key, node);
   }

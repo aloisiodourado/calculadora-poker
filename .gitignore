@@ -42,3 +42,7 @@ next-env.d.ts
 
 # claude code internal
 .claude/
+
+# large solver training outputs (3-way shards + combo dirs)
+public/solver-strategy-3way-shard*.json
+public/solver-strategy-3way-shard*-combos/

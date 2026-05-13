@@ -1,7 +1,8 @@
 import { createDeck, removeCards } from "@/engine/cards/Deck";
 import { Card } from "@/engine/cards";
 import { DrawCount } from "../game/types";
-import { NUM_BUCKETS, handToBucket, initBuckets } from "./handBuckets";
+import type { BlockerBin } from "../game/types";
+import { NUM_BUCKETS, handToBucket, initBuckets, blockerBinForHand } from "./handBuckets";
 import { keepIndicesForDraw } from "../game/draw";
 
 // TransitionMatrix[fromBucket][drawCount][toBucket] = probability
@@ -123,4 +124,76 @@ export function exportMatrix(matrix: TransitionMatrix): number[][][] {
 
 export function importMatrix(data: number[][][]): TransitionMatrix {
   return data;
+}
+
+// ── Blocker transition matrix ──────────────────────────────────────────────────
+//
+// BlockerTransition[oldBucket][oldBl][drawCount] → [prob_bl0, prob_bl1, prob_bl2]
+//
+// More accurate than the marginal P(newBl | newBucket): if you held two 2s
+// and kept one while drawing, your new blockerBin is correlated with the old one.
+
+type BlockerTransitionMatrix = number[][][][]; // [bucket][oldBl][drawCount][newBl]
+
+let _blockerTransition: BlockerTransitionMatrix | null = null;
+
+export function initBlockerTransition(samplesPerBucket = SAMPLES_PER_BUCKET): void {
+  if (_blockerTransition) return;
+
+  const bucketHands = sampleHandsPerBucket(samplesPerBucket);
+  const deck = createDeck();
+
+  // counts[b][oldBl][dc][newBl]
+  const counts: number[][][][] = Array.from({ length: NUM_BUCKETS }, () =>
+    Array.from({ length: 3 }, () =>
+      Array.from({ length: 6 }, () => [0, 0, 0])
+    )
+  );
+  const totals: number[][][] = Array.from({ length: NUM_BUCKETS }, () =>
+    Array.from({ length: 3 }, () => new Array(6).fill(0))
+  );
+
+  for (let b = 0; b < NUM_BUCKETS; b++) {
+    for (const hand of bucketHands[b]) {
+      const oldBl = blockerBinForHand(hand);
+
+      for (let dc = 0; dc <= 5; dc++) {
+        const keepIdx = keepIndicesForDraw(hand, dc as DrawCount);
+        const kept = keepIdx.map((i) => hand[i]);
+        const remaining = removeCards(deck, kept);
+        const drawn = shuffle([...remaining]).slice(0, dc);
+        const newHand = [...kept, ...drawn];
+        const newBl = blockerBinForHand(newHand);
+
+        counts[b][oldBl][dc][newBl]++;
+        totals[b][oldBl][dc]++;
+      }
+    }
+  }
+
+  _blockerTransition = counts.map((bData, b) =>
+    bData.map((blData, oldBl) =>
+      blData.map((dcData, dc) => {
+        const total = totals[b][oldBl][dc];
+        if (total === 0) return [1 / 3, 1 / 3, 1 / 3];
+        return dcData.map((c) => c / total);
+      })
+    )
+  );
+}
+
+// Sample the new blockerBin after drawing drawCount cards, using the full
+// transition matrix P(newBl | oldBucket, oldBl, drawCount).
+// Falls back to marginal if transition matrix is not initialised.
+export function sampleBlockerBinAfterDraw(
+  oldBucket: number,
+  oldBl: BlockerBin,
+  drawCount: DrawCount,
+): BlockerBin {
+  if (!_blockerTransition) initBlockerTransition();
+  const dist = _blockerTransition![oldBucket][oldBl][drawCount];
+  const r = Math.random();
+  if (r < dist[0]) return 0;
+  if (r < dist[0] + dist[1]) return 1;
+  return 2;
 }

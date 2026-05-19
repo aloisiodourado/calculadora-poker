@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { Card, Rank, Suit, RANKS } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { VariantConfig } from "@/engine/variants/types";
@@ -21,11 +21,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { X, Target, Plus, LayoutList } from "lucide-react";
+import { X, Target, Plus, LayoutList, SquarePen } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HandCategory, HAND_CATEGORIES, CATEGORY_SHORT, CATEGORY_LABELS, CATEGORY_RANGE_PCT, CATEGORY_KEEP_COUNT } from "@/lib/representative-hands-27td";
 import { RangeEntry, DEFAULT_RANGE_ENTRY, RANGE_RANK_OPTIONS, rangeEntryLabel } from "@/lib/range-hand-builder";
 import { useDeckColor } from "@/contexts/DeckColorContext";
+import { parseStudRange, describeStudRange, countRangeCombinations, MAX_COMBO_COUNT } from "@/engine/ranges/studRangeParser";
 
 export const PLAYER_COLORS = [
   "bg-blue-500",
@@ -110,6 +111,9 @@ interface HandInputProps {
   canRemove: boolean;
   playerRange?: RangeEntry[] | null;
   onRangeChange?: (range: RangeEntry[] | null) => void;
+  // Stud range mode
+  studRangePattern?: string | null;
+  onStudRangeChange?: (pattern: string | null) => void;
 }
 
 export function HandInput({
@@ -139,6 +143,8 @@ export function HandInput({
   canRemove,
   playerRange,
   onRangeChange,
+  studRangePattern,
+  onStudRangeChange,
 }: HandInputProps) {
   const colorIdx = handIndex % PLAYER_COLORS.length;
   const isStud = STUD_VARIANTS.includes(variant);
@@ -149,6 +155,7 @@ export function HandInput({
   const showEmptyDiscardCheckboxes = isTripleDraw || isSingleDraw27;
   const inCategoryMode = isTripleDraw && !!handCategory;
   const inRangeMode = isTripleDraw && !!onRangeChange && playerRange != null;
+  const inStudRangeMode = isStud && !!onStudRangeChange && studRangePattern != null;
 
   const currentRoundIdx = isTripleDraw && drawRoundsLeft != null ? 3 - drawRoundsLeft : null;
   const currentDrawStrategy =
@@ -207,6 +214,26 @@ export function HandInput({
               <LayoutList className="h-3 w-3" />
             </Button>
           )}
+          {isStud && onStudRangeChange && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-6 w-6", inStudRangeMode ? "text-violet-500" : "text-muted-foreground")}
+              onClick={() => {
+                if (inStudRangeMode) {
+                  onStudRangeChange(null);
+                } else {
+                  // Limpa hole cards (B1, B2) antes de entrar no range mode
+                  onCardChange(0, null);
+                  onCardChange(1, null);
+                  onStudRangeChange("");
+                }
+              }}
+              title={inStudRangeMode ? "Voltar para picker de cartas" : "Definir range de hole cards"}
+            >
+              <SquarePen className="h-3 w-3" />
+            </Button>
+          )}
           {onSetActive && (
             <Button
               variant="ghost"
@@ -248,13 +275,19 @@ export function HandInput({
         />
       )}
 
-      {/* Stud layout — keeps individual pickers (different structure) */}
+      {/* Stud — card picker sempre visível; range input aparece quando ativo */}
       {isStud && (
         <StudLayout
           cards={cards}
-          discards={discards}
-          slotBlocked={slotBlocked}
+          blockedCards={blockedCards}
           onCardChange={onCardChange}
+          disabledSlots={inStudRangeMode ? new Set([0, 1]) : undefined}
+        />
+      )}
+      {isStud && inStudRangeMode && onStudRangeChange && (
+        <StudRangeInput
+          pattern={studRangePattern ?? ""}
+          onChange={onStudRangeChange}
         />
       )}
 
@@ -621,71 +654,388 @@ function DefaultLayout({
 
 // ── Stud layout — keeps individual pickers ─────────────────────────────────────
 
-function StudLayout({
-  cards,
-  discards,
-  slotBlocked,
+// Slot labels indexed by card position (0-6)
+const STUD_SLOT_LABELS = ["B1", "B2", "3ª", "4ª", "5ª", "6ª", "7ª"];
+
+function StudMultiPicker({
+  groupLabel,
+  slotIndices,
+  closedSlots = new Set<number>(),
+  disabledSlots = new Set<number>(),
+  allCards,
+  blockedCards,
   onCardChange,
 }: {
-  cards: (Card | null)[];
-  discards: boolean[];
-  slotBlocked: (i: number) => Card[];
-  onCardChange: (i: number, c: Card | null) => void;
+  groupLabel?: string;
+  slotIndices: number[];
+  closedSlots?: Set<number>;
+  disabledSlots?: Set<number>;
+  allCards: (Card | null)[];
+  blockedCards: Card[];
+  onCardChange: (idx: number, card: Card | null) => void;
 }) {
-  const holeSlots = [0, 1];
-  const upSlots = [2, 3, 4, 5];
-  const seventhSlot = 6;
+  const { suitColors } = useDeckColor();
+  const [picking, setPicking] = useState(false);
+  const [activeGroupIdx, setActiveGroupIdx] = useState(0);
+
+  const activeCardIdx = slotIndices[activeGroupIdx];
+
+  function isBlocked(card: Card): boolean {
+    if (blockedCards.some(b => b.rank === card.rank && b.suit === card.suit)) return true;
+    // block cards selected in any other slot of this player
+    return allCards.some((c, ci) => {
+      if (ci === activeCardIdx) return false;
+      return c !== null && c.rank === card.rank && c.suit === card.suit;
+    });
+  }
+
+  function handleSlotClick(groupIdx: number) {
+    setActiveGroupIdx(groupIdx);
+    setPicking(true);
+  }
+
+  function handleClearSlot(groupIdx: number, e: React.MouseEvent) {
+    e.stopPropagation();
+    onCardChange(slotIndices[groupIdx], null);
+  }
+
+  function handleCardClick(card: Card) {
+    if (isBlocked(card)) return;
+    const current = allCards[activeCardIdx];
+    if (current?.rank === card.rank && current?.suit === card.suit) {
+      onCardChange(activeCardIdx, null);
+      return;
+    }
+    onCardChange(activeCardIdx, card);
+    // auto-advance to next empty slot in this group
+    const nextEmpty = slotIndices.findIndex((si, gi) => gi !== activeGroupIdx && allCards[si] === null);
+    if (nextEmpty !== -1) {
+      setActiveGroupIdx(nextEmpty);
+    } else {
+      setPicking(false);
+    }
+  }
+
+  const groupCards = slotIndices.map(i => allCards[i] ?? null);
 
   return (
-    <div className="flex items-start gap-4 flex-wrap">
-      <div className="flex flex-col gap-1">
+    <div className="space-y-2">
+      {groupLabel && (
         <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Hole (down)
+          {groupLabel}
         </span>
-        <div className="flex gap-1.5">
-          {holeSlots.map((i) => (
-            <CardPicker
-              key={i}
-              selected={cards[i] ?? null}
-              onSelect={(c) => onCardChange(i, c)}
-              blockedCards={slotBlocked(i)}
-              label={STUD_LABELS[i]}
-            />
-          ))}
-        </div>
-      </div>
+      )}
 
-      <div className="w-px bg-slate-200 self-stretch mt-5" />
-
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          Up cards
-        </span>
-        <div className="flex gap-1.5">
-          {upSlots.map((i) => (
-            <CardPicker
-              key={i}
-              selected={cards[i] ?? null}
-              onSelect={(c) => onCardChange(i, c)}
-              blockedCards={slotBlocked(i)}
-              label={STUD_LABELS[i]}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="w-px bg-slate-200 self-stretch mt-5" />
-
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-          7th St (down)
-        </span>
-        <CardPicker
-          selected={cards[seventhSlot] ?? null}
-          onSelect={(c) => onCardChange(seventhSlot, c)}
-          blockedCards={slotBlocked(seventhSlot)}
+      {/* Transparent full-screen overlay — catches every click outside the picker */}
+      {picking && (
+        <div
+          className="fixed inset-0 z-[50]"
+          onMouseDown={() => setPicking(false)}
         />
+      )}
+
+      {/* Slot row + card grid — elevated above overlay when open */}
+      <div className={picking ? "relative z-[60] space-y-2" : "space-y-2"}>
+        {/* Slot row */}
+        <div className="flex gap-1 items-end overflow-x-auto pb-1">
+          {slotIndices.map((cardIdx, gi) => {
+            const card = allCards[cardIdx] ?? null;
+            const isClosed = closedSlots.has(gi);
+            const isDisabled = disabledSlots.has(gi);
+            const prevIsClosed = gi > 0 ? closedSlots.has(gi - 1) : isClosed;
+            const showSeparator = gi > 0 && isClosed !== prevIsClosed;
+            return (
+              <Fragment key={cardIdx}>
+                {showSeparator && (
+                  <div className="self-stretch w-px bg-border/60 mx-0.5" />
+                )}
+                <button
+                  onClick={() => !isDisabled && handleSlotClick(gi)}
+                  disabled={isDisabled}
+                  className={cn(
+                    "relative h-20 w-12 rounded-xl border-2 flex flex-col items-center justify-center font-bold select-none transition-all gap-0.5 shrink-0",
+                    isDisabled
+                      ? "border-dashed border-violet-400/40 bg-violet-500/5 opacity-50 cursor-not-allowed"
+                      : card
+                        ? isClosed
+                          ? "bg-white dark:bg-zinc-800 shadow-md border-slate-400/40 dark:border-slate-600/40"
+                          : "bg-white dark:bg-zinc-800 shadow-md border-transparent"
+                        : isClosed
+                          ? "border-dashed border-slate-400/40 bg-slate-500/5 hover:border-slate-400/70 hover:bg-slate-500/10"
+                          : "border-dashed border-muted-foreground/30 bg-muted/20 hover:border-primary/50 hover:bg-primary/5",
+                    !isDisabled && picking && activeGroupIdx === gi && "ring-2 ring-primary ring-offset-1",
+                  )}
+                  title={isDisabled ? "Controlado pelo range" : card ? "Clique para trocar" : "Clique para selecionar"}
+                >
+                  {isDisabled ? (
+                    <span className="text-[9px] text-violet-400 font-semibold uppercase tracking-wide">range</span>
+                  ) : card ? (
+                    <>
+                      <span className={cn("text-2xl leading-none font-bold", suitColors[card.suit])}>
+                        {RANK_LABELS[card.rank]}
+                      </span>
+                      <span className={cn("text-xl leading-none", suitColors[card.suit])}>
+                        {SUIT_SYMBOLS[card.suit]}
+                      </span>
+                      <span
+                        role="button"
+                        className="absolute -top-1.5 -right-1.5 bg-background border rounded-full p-0.5 hover:bg-destructive hover:text-destructive-foreground cursor-pointer transition-colors"
+                        onClick={(e) => handleClearSlot(gi, e)}
+                        title="Remover"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground font-normal">
+                      {STUD_SLOT_LABELS[cardIdx]}
+                    </span>
+                  )}
+                </button>
+              </Fragment>
+            );
+          })}
+          {groupCards.some(Boolean) && (
+            <button
+              onClick={() => { slotIndices.forEach(i => onCardChange(i, null)); setPicking(false); }}
+              className="self-end pb-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Limpar
+            </button>
+          )}
+        </div>
+
+        {/* Inline card grid */}
+        {picking && (
+          <div className="rounded-xl border bg-card p-3 space-y-2">
+            {/* Slot tabs */}
+            <div className="flex items-center gap-1 flex-wrap">
+              {slotIndices.map((cardIdx, gi) => {
+                const card = allCards[cardIdx] ?? null;
+                return (
+                  <button
+                    key={cardIdx}
+                    onClick={() => setActiveGroupIdx(gi)}
+                    className={cn(
+                      "px-2 py-0.5 rounded text-xs font-medium transition-all",
+                      activeGroupIdx === gi
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80",
+                    )}
+                  >
+                    {card ? (
+                      <span className={suitColors[card.suit]}>
+                        {RANK_LABELS[card.rank]}{SUIT_SYMBOLS[card.suit]}
+                      </span>
+                    ) : STUD_SLOT_LABELS[cardIdx]}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setPicking(false)}
+                className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+              >
+                Fechar
+              </button>
+            </div>
+
+            {/* Card grid */}
+            <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${RANKS.length}, 1fr)` }}>
+              {DISPLAY_SUITS.map((suit) =>
+                [...RANKS].reverse().map((rank) => {
+                  const card: Card = { rank, suit };
+                  const blocked = isBlocked(card);
+                  const activeCard = allCards[activeCardIdx];
+                  const isCurrent = activeCard?.rank === rank && activeCard?.suit === suit;
+                  return (
+                    <button
+                      key={`${rank}-${suit}`}
+                      onClick={() => handleCardClick(card)}
+                      disabled={blocked}
+                      className={cn(
+                        "h-16 rounded-lg font-bold flex flex-col items-center justify-center leading-none transition-all gap-0.5",
+                        blocked && "opacity-20 cursor-not-allowed",
+                        isCurrent && "bg-primary text-primary-foreground scale-105 shadow-md",
+                        !blocked && !isCurrent && cn("hover:bg-muted hover:scale-105 cursor-pointer", suitColors[suit]),
+                      )}
+                    >
+                      <span className="text-sm font-bold">{RANK_LABELS[rank]}</span>
+                      <span className="text-base leading-none">{SUIT_SYMBOLS[suit]}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function StudLayout({
+  cards,
+  blockedCards,
+  onCardChange,
+  disabledSlots,
+}: {
+  cards: (Card | null)[];
+  blockedCards: Card[];
+  onCardChange: (i: number, c: Card | null) => void;
+  disabledSlots?: Set<number>;
+}) {
+  // Single row: [B1 B2] | [3ª 4ª 5ª 6ª] | [7ª]
+  // gi 0,1 = face-down hole cards; gi 2-5 = face-up upcards; gi 6 = face-down 7th street
+  return (
+    <StudMultiPicker
+      slotIndices={[0, 1, 2, 3, 4, 5, 6]}
+      closedSlots={new Set([0, 1, 6])}
+      disabledSlots={disabledSlots}
+      allCards={cards}
+      blockedCards={blockedCards}
+      onCardChange={onCardChange}
+    />
+  );
+}
+
+// ── Stud range text input ─────────────────────────────────────────────────────
+
+const STUD_PAIR_RANKS = [
+  Rank.Two, Rank.Three, Rank.Four, Rank.Five, Rank.Six, Rank.Seven,
+  Rank.Eight, Rank.Nine, Rank.Ten, Rank.Jack, Rank.Queen, Rank.King, Rank.Ace,
+];
+const STUD_HIGH_RANKS = [Rank.Ace, Rank.King, Rank.Queen, Rank.Jack, Rank.Ten, Rank.Nine, Rank.Eight];
+const STUD_SUITED_SUITS = [Suit.Spades, Suit.Hearts, Suit.Diamonds, Suit.Clubs];
+
+function StudRangeInput({
+  pattern,
+  onChange,
+}: {
+  pattern: string;
+  onChange: (p: string | null) => void;
+}) {
+  const { suitColors } = useDeckColor();
+  const trimmed = pattern.trim();
+  const parsed = trimmed ? parseStudRange(pattern) : null;
+  const isValid = !trimmed || parsed !== null;
+  const description = parsed ? describeStudRange(parsed) : null;
+  const comboCount = parsed ? countRangeCombinations(parsed) : null;
+
+  function append(token: string) {
+    const current = pattern.trim();
+    onChange(current ? `${current}, ${token}` : token);
+  }
+
+  const chipCls = "text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded border border-border/60 bg-muted/30 hover:bg-muted hover:border-border transition-colors cursor-pointer";
+
+  return (
+    <div className="space-y-2 pt-2 border-t border-border/40">
+      {/* Text input row */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider shrink-0">Range</span>
+        <input
+          type="text"
+          value={pattern}
+          onChange={e => onChange(e.target.value || null)}
+          placeholder='ex: 22+, A*, ss'
+          spellCheck={false}
+          className={cn(
+            "flex-1 text-sm font-mono border rounded-lg px-3 py-1 bg-background focus:outline-none focus:ring-2 transition-colors",
+            isValid
+              ? "border-border focus:ring-primary/30"
+              : "border-destructive focus:ring-destructive/30 text-destructive"
+          )}
+        />
+        {trimmed && (
+          <button
+            onClick={() => onChange("")}
+            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            title="Limpar range"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {!isValid && (
+        <p className="text-[10px] text-destructive">Padrão inválido — verifique a sintaxe</p>
+      )}
+      {parsed && (description || comboCount !== null) && (
+        <div className="flex items-center justify-between gap-2 px-0.5">
+          {description && (
+            <span className="text-[10px] text-muted-foreground italic truncate">{description}</span>
+          )}
+          {comboCount !== null && (
+            <span className="text-[10px] font-semibold tabular-nums text-muted-foreground whitespace-nowrap ml-auto">
+              {comboCount >= MAX_COMBO_COUNT ? "2M+" : comboCount.toLocaleString("pt-BR")} combos
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Quick helpers ── */}
+      <div className="space-y-1.5">
+        {/* Pair ranges */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[10px] text-muted-foreground w-7 shrink-0">Par:</span>
+          {STUD_PAIR_RANKS.map(rank => (
+            <button
+              key={rank}
+              onClick={() => append(`${RANK_LABELS[rank]}${RANK_LABELS[rank]}+`)}
+              className={chipCls}
+              title={`Par de ${RANK_LABELS[rank]}s ou melhor`}
+            >
+              {RANK_LABELS[rank]}+
+            </button>
+          ))}
+        </div>
+
+        {/* Suited hole cards */}
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-muted-foreground w-7 shrink-0">Suit:</span>
+          {STUD_SUITED_SUITS.map(suit => (
+            <button
+              key={suit}
+              onClick={() => append(`${suit}${suit}`)}
+              className={cn(chipCls, suitColors[suit])}
+              title={`Ambas hole cards ${SUIT_SYMBOLS[suit]}`}
+            >
+              {SUIT_SYMBOLS[suit]}{SUIT_SYMBOLS[suit]}
+            </button>
+          ))}
+        </div>
+
+        {/* High card + any */}
+        <div className="flex items-center gap-1 flex-wrap">
+          <span className="text-[10px] text-muted-foreground w-7 shrink-0">X*:</span>
+          {STUD_HIGH_RANKS.map(rank => (
+            <button
+              key={rank}
+              onClick={() => append(`${RANK_LABELS[rank]}*`)}
+              className={chipCls}
+              title={`${RANK_LABELS[rank]} no hole + qualquer`}
+            >
+              {RANK_LABELS[rank]}*
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Collapsible syntax help */}
+      <details>
+        <summary className="text-[10px] text-muted-foreground cursor-pointer list-none underline decoration-dotted w-fit">
+          Sintaxe avançada
+        </summary>
+        <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+          <span className="font-mono">*</span> qualquer ·{" "}
+          <span className="font-mono">R O N</span> var. valor ·{" "}
+          <span className="font-mono">w x y z</span> var. naipe ·{" "}
+          <span className="font-mono">As Kh</span> carta específica ·{" "}
+          <span className="font-mono">$B $L $Z</span> macros ·{" "}
+          <span className="font-mono">|</span> streets ·{" "}
+          <span className="font-mono">,</span> alternativas
+        </p>
+      </details>
     </div>
   );
 }

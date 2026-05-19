@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { variant, hands, board, iterations, drawRoundsLeft, playerDrawStrategies, playerExplicitDiscards } = body;
+  const { variant, hands, board, iterations, drawRoundsLeft, playerDrawStrategies, playerExplicitDiscards, deadCards, playerRangePatterns } = body;
 
   if (!variant || !hands || !Array.isArray(hands) || hands.length < 2) {
     return NextResponse.json({ error: "Need variant and at least 2 hands" }, { status: 400 });
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
       drawRoundsLeft,
       playerDrawStrategies,
       playerExplicitDiscards,
+      deadCards: deadCards ?? [],
+      playerRangePatterns: playerRangePatterns ?? [],
     });
     return NextResponse.json(result);
   } catch (err) {

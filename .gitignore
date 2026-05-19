@@ -42,3 +42,6 @@ next-env.d.ts
 
 # claude code internal
 .claude/
+
+# large solver data files (generated, not versioned)
+/public/solver-strategy-*

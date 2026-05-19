@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Card, Rank, Suit, SUITS } from "@/engine/cards";
+import { useState, useMemo, useEffect } from "react";
+import { Card, Rank, SUITS, cardToString } from "@/engine/cards";
 import { PokerVariant } from "@/engine/variants";
 import { getVariantConfig } from "@/engine/variants/config";
 import { SimulationResult, DrawRoundStrategy } from "@/engine/simulator/types";
@@ -11,6 +11,7 @@ import { HandCategory, buildStrategyAwareRepHand } from "@/lib/representative-ha
 import { RangeEntry, buildRangeHandState } from "@/lib/range-hand-builder";
 import { VariantSelector } from "@/components/VariantSelector";
 import { PotOddsPanel } from "@/components/PotOddsPanel";
+import { DeadCardsPanel } from "@/components/DeadCardsPanel";
 import { Top10Panel } from "@/components/Top10Panel";
 import { HandInput } from "@/components/HandInput";
 import { BoardInput } from "@/components/BoardInput";
@@ -22,7 +23,7 @@ import { useDeckColor } from "@/contexts/DeckColorContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DrawsLeftSelector } from "@/components/DrawsLeftSelector";
 
-const DEFAULT_VARIANT = PokerVariant.TripleDraw27;
+const DEFAULT_VARIANT = PokerVariant.SevenCardStud;
 const MAX_PLAYERS = 6;
 const TRIPLE_DRAW_SLOTS = 5;
 
@@ -46,6 +47,16 @@ const POT_ODDS_DEFAULTS: Record<number, { pot: number; bet: number }> = {
   3: { pot: 3.5, bet: 1 },
   2: { pot: 5.5, bet: 1 },
   1: { pot: 8.5, bet: 2 },
+};
+
+// Stud street defaults keyed by max open-card count across all players
+// 1 up card = 3rd street, 2 = 4th, 3 = 5th, 4 = 6th
+const STUD_STREET_DEFAULTS: Record<number, { label: string; pot: number; bet: number }> = {
+  0: { label: "3ª street", pot: 2.3, bet: 1 },
+  1: { label: "3ª street", pot: 2.3, bet: 1 },
+  2: { label: "4ª street", pot: 4.3, bet: 1 },
+  3: { label: "5ª street", pot: 6.3, bet: 2 },
+  4: { label: "6ª street", pot: 10.3, bet: 2 },
 };
 
 export default function Home() {
@@ -78,6 +89,12 @@ export default function Home() {
   const [pot, setPot] = useState<number>(POT_ODDS_DEFAULTS[3].pot);
   const [bet, setBet] = useState<number>(POT_ODDS_DEFAULTS[3].bet);
 
+  // Dead cards (seen in folded hands — excluded from simulation deck)
+  const [deadCards, setDeadCards] = useState<Card[]>([]);
+
+  // Stud range patterns per player (null = use card picker; string = ProPokerTools pattern)
+  const [studRangePatterns, setStudRangePatterns] = useState<(string | null)[]>([null, null]);
+
   const requiredEquity = useMemo(() => {
     const denom = pot + bet;
     return denom > 0 ? bet / denom : 0;
@@ -87,6 +104,25 @@ export default function Home() {
   const isHiLo = config.evaluators.length === 2;
   const isTripleDraw = variant === PokerVariant.TripleDraw27;
   const is27Low = isTripleDraw || variant === PokerVariant.SingleDraw27;
+  const isStud = config.studGame;
+
+  // Stud street detection: count max open cards (slots 2–5) across all players
+  const studUpCardCount = useMemo(() => {
+    if (!isStud) return 0;
+    return Math.max(...hands.map(hand =>
+      [2, 3, 4, 5].filter(i => hand[i] != null).length
+    ));
+  }, [hands, isStud]);
+
+  const studStreetInfo = isStud ? (STUD_STREET_DEFAULTS[studUpCardCount] ?? STUD_STREET_DEFAULTS[1]) : null;
+
+  // Auto-set pot/bet defaults when stud street changes
+  useEffect(() => {
+    if (!isStud || !studStreetInfo) return;
+    setPot(studStreetInfo.pot);
+    setBet(studStreetInfo.bet);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studUpCardCount, isStud]);
   const { scheme, toggle } = useDeckColor();
   const { theme, toggle: toggleTheme } = useTheme();
 
@@ -128,6 +164,8 @@ export default function Home() {
     setHandCategories((prev) => prev.map(() => null));
     setPlayerRanges((prev) => prev.map(() => null));
     setActivePlayerIdx(null);
+    setDeadCards([]);
+    setStudRangePatterns([null, null]);
     setResult(null);
     setError(null);
   }
@@ -261,6 +299,15 @@ export default function Home() {
     setResult(null);
   }
 
+  function handleStudRangeChange(playerIdx: number, pattern: string | null) {
+    setStudRangePatterns((prev) => {
+      const next = [...prev];
+      next[playerIdx] = pattern;
+      return next;
+    });
+    setResult(null);
+  }
+
   function addPlayer() {
     if (hands.length >= MAX_PLAYERS) return;
     setHands((prev) => [...prev, emptyHand(config.holeCards)]);
@@ -269,6 +316,7 @@ export default function Home() {
     setPlayerExplicitDiscards((prev) => [...prev, emptyExplicitDiscards()]);
     setHandCategories((prev) => [...prev, null]);
     setPlayerRanges((prev) => [...prev, null]);
+    setStudRangePatterns((prev) => [...prev, null]);
     setResult(null);
   }
 
@@ -280,6 +328,7 @@ export default function Home() {
     setPlayerExplicitDiscards((prev) => prev.filter((_, i) => i !== idx));
     setHandCategories((prev) => prev.filter((_, i) => i !== idx));
     setPlayerRanges((prev) => prev.filter((_, i) => i !== idx));
+    setStudRangePatterns((prev) => prev.filter((_, i) => i !== idx));
     if (activePlayerIdx === idx) setActivePlayerIdx(null);
     setResult(null);
   }
@@ -294,14 +343,29 @@ export default function Home() {
 
     try {
       if (!hasAnyRange) {
-        const handData = hands.map((h, hi) =>
-          h.filter((c, ci): c is Card => c !== null && !discards[hi][ci])
-        );
+        // For stud range players, pass empty hands — simulator samples from the pattern.
+        // Any explicitly-placed upcards (slots 2-6) are appended to the range pattern via
+        // the pipe separator (e.g. "K*" + K♦ in slot 2 → "K*|Kd") so the simulator
+        // knows those cards are fixed and removes them from the available deck.
+        const handData = hands.map((h, hi) => {
+          if (isStud && studRangePatterns[hi]) return [];
+          return h.filter((c, ci): c is Card => c !== null && !discards[hi][ci]);
+        });
+        const studRangePatternsWithUpcards = isStud
+          ? studRangePatterns.map((pattern, hi) => {
+              if (!pattern) return null;
+              const fixedUpcards = hands[hi].slice(2, 7).filter((c): c is Card => c !== null);
+              if (fixedUpcards.length === 0) return pattern;
+              return `${pattern}|${fixedUpcards.map(cardToString).join("")}`;
+            })
+          : studRangePatterns;
         const body: Record<string, unknown> = {
           variant,
           hands: handData,
           board: boardData,
           iterations,
+          deadCards,
+          playerRangePatterns: studRangePatternsWithUpcards,
         };
         if (isTripleDraw) {
           body.drawRoundsLeft = drawRoundsLeft;
@@ -348,6 +412,7 @@ export default function Home() {
               hands: combo.map((p) => p.cards),
               board: boardData,
               iterations,
+              deadCards,
             };
             if (isTripleDraw) {
               body.drawRoundsLeft = drawRoundsLeft;
@@ -493,13 +558,28 @@ export default function Home() {
               )}
             </div>
 
-            {isTripleDraw && (
-              <PotOddsPanel
-                pot={pot}
-                bet={bet}
-                onPotChange={setPot}
-                onBetChange={setBet}
-                requiredEquity={requiredEquity}
+            {(isTripleDraw || isStud) && (
+              <>
+                {isStud && studStreetInfo && (
+                  <div className="text-xs text-muted-foreground font-medium px-1 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400 inline-block" />
+                    {studStreetInfo.label} detectada
+                  </div>
+                )}
+                <PotOddsPanel
+                  pot={pot}
+                  bet={bet}
+                  onPotChange={setPot}
+                  onBetChange={setBet}
+                  requiredEquity={requiredEquity}
+                />
+              </>
+            )}
+            {isStud && (
+              <DeadCardsPanel
+                deadCards={deadCards}
+                blockedCards={allSelectedCards}
+                onChange={setDeadCards}
               />
             )}
           </div>
@@ -507,9 +587,12 @@ export default function Home() {
           {/* Player hands */}
           <div className="flex-1 min-w-0 space-y-3">
             {hands.map((hand, i) => {
-              const otherCards = allSelectedCards.filter(
-                (c) => !hand.some((h) => h?.rank === c.rank && h?.suit === c.suit)
-              );
+              const otherCards = [
+                ...allSelectedCards.filter(
+                  (c) => !hand.some((h) => h?.rank === c.rank && h?.suit === c.suit)
+                ),
+                ...deadCards,
+              ];
               return (
                 <HandInput
                   key={i}
@@ -541,7 +624,9 @@ export default function Home() {
                   onCategoryChange={isTripleDraw ? (cat) => handleCategoryChange(i, cat) : undefined}
                   playerRange={isTripleDraw ? playerRanges[i] : undefined}
                   onRangeChange={isTripleDraw ? (range) => handleRangeChange(i, range) : undefined}
-                  onSetActive={() => setActivePlayerIdx(activePlayerIdx === i ? null : i)}
+                  studRangePattern={isStud ? (studRangePatterns[i] ?? null) : undefined}
+                  onStudRangeChange={isStud ? (p) => handleStudRangeChange(i, p) : undefined}
+                  onSetActive={is27Low ? () => setActivePlayerIdx(activePlayerIdx === i ? null : i) : undefined}
                   onRemove={() => removePlayer(i)}
                   canRemove={hands.length > 2}
                 />

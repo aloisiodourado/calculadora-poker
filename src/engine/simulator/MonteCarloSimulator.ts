@@ -1,5 +1,6 @@
 import { Card } from "../cards";
 import { createDeck, removeCards } from "../cards/Deck";
+import { parseStudRange, sampleStudHand, computeBranchWeights } from "../ranges/studRangeParser";
 import {
   HighHandEvaluator,
   AceToFiveLowEvaluator,
@@ -106,7 +107,44 @@ export class MonteCarloSimulator implements SimulatorEngine {
       loQualified: 0,
     }));
 
-    const knownCards = [...board, ...hands.flat()];
+    // Pre-parse range patterns once (ranges apply only to stud, non-triple-draw)
+    const parsedRanges = (input.playerRangePatterns ?? []).map(p =>
+      p ? parseStudRange(p) : null
+    );
+    const hasRanges = !isTripleDraw && parsedRanges.some(r => r !== null);
+
+    // Dead-card filtering: if a dead card is explicitly present in a player's hand
+    // or as a fixed card in a range pattern, it belongs to that player — ignore the
+    // dead-card flag for it. Only truly-orphan dead cards are removed from the deck.
+    const explicitCardKeys = new Set<string>(
+      hands.flat().map(c => `${c.rank}|${c.suit}`)
+    );
+    for (const range of parsedRanges) {
+      if (!range) continue;
+      for (const branch of range) {
+        for (const c of branch.constraints) {
+          if (c.rankFixed !== null && c.suitFixed !== null) {
+            explicitCardKeys.add(`${c.rankFixed}|${c.suitFixed}`);
+          }
+        }
+      }
+    }
+    const effectiveDeadCards = (input.deadCards ?? []).filter(
+      c => !explicitCardKeys.has(`${c.rank}|${c.suit}`)
+    );
+
+    // knownCards: board + fixed hands + effective dead cards
+    const knownCards = [...board, ...hands.flat(), ...effectiveDeadCards];
+
+    // Pre-compute branch weights for each range player from the initial available deck.
+    // This gives proportional (combo-count-weighted) branch sampling instead of uniform,
+    // matching how PPT weights branches by the number of combos in each alternative.
+    const initialDeck = removeCards(createDeck(), knownCards);
+    const branchWeightsPerPlayer = parsedRanges.map(range =>
+      range ? computeBranchWeights(range, initialDeck) : null
+    );
+
+    let successfulIterations = 0;
 
     for (let i = 0; i < iterations; i++) {
       const deck = shuffle(removeCards(createDeck(), knownCards));
@@ -120,25 +158,81 @@ export class MonteCarloSimulator implements SimulatorEngine {
           input.playerExplicitDiscards
         );
         this.runStandardIteration(finalHands, [], config, results);
+        successfulIterations++;
+      } else if (hasRanges) {
+        // Sample each range player independently from the full deck, then reject
+        // iterations where any two players share a card. This matches PPT's approach
+        // and avoids the bias of sequential sampling (where P1 depletes the deck
+        // before P3 can draw their constrained cards).
+        const MAX_JOINT_RETRIES = 50;
+        let resolved = false;
+
+        for (let joint = 0; joint < MAX_JOINT_RETRIES; joint++) {
+          // Sample each range player from the FULL deck independently
+          const sampledPerPlayer: (Card[] | null)[] = parsedRanges.map((range, pi) => {
+            if (!range) return null;
+            return sampleStudHand(range, deck, 5, branchWeightsPerPlayer[pi] ?? undefined);
+          });
+
+          // Fail fast if any range player couldn't be sampled
+          if (sampledPerPlayer.some((s, pi) => parsedRanges[pi] !== null && s === null)) continue;
+
+          // Reject if any two players share a card
+          const usedKeys = new Set<string>();
+          let conflict = false;
+          for (const cards of sampledPerPlayer) {
+            if (!cards) continue;
+            for (const c of cards) {
+              const key = `${c.rank}|${c.suit}`;
+              if (usedKeys.has(key)) { conflict = true; break; }
+              usedKeys.add(key);
+            }
+            if (conflict) break;
+          }
+          if (conflict) continue;
+
+          // No conflict — build work hands and remaining deck
+          const workHands = hands.map(h => [...h]);
+          let workDeck = deck;
+          for (let pi = 0; pi < sampledPerPlayer.length; pi++) {
+            const cards = sampledPerPlayer[pi];
+            if (!cards) continue;
+            workHands[pi] = cards;
+            const keys = new Set(cards.map(c => `${c.rank}|${c.suit}`));
+            workDeck = workDeck.filter(c => !keys.has(`${c.rank}|${c.suit}`));
+          }
+
+          resolved = true;
+          successfulIterations++;
+          const { completedHands, completedBoard } = completeHands(workHands, board, workDeck, config);
+          if (isHiLo) {
+            this.runHiLoIteration(completedHands, completedBoard, config, results);
+          } else {
+            this.runStandardIteration(completedHands, completedBoard, config, results);
+          }
+          break;
+        }
+
+        if (!resolved) continue; // all joint retry attempts exhausted
       } else {
-        const { completedHands, completedBoard } = completeHands(
-          hands, board, deck, config
-        );
+        const { completedHands, completedBoard } = completeHands(hands, board, deck, config);
         if (isHiLo) {
           this.runHiLoIteration(completedHands, completedBoard, config, results);
         } else {
           this.runStandardIteration(completedHands, completedBoard, config, results);
         }
+        successfulIterations++;
       }
     }
 
+    const denom = successfulIterations > 0 ? successfulIterations : 1;
     for (const r of results) {
-      r.equity = r.wins / iterations;
+      r.equity = r.wins / denom;
     }
 
     return {
       results,
-      iterationsRun: iterations,
+      iterationsRun: successfulIterations,
       durationMs: Date.now() - start,
     };
   }
